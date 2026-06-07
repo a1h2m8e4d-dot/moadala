@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="ملوك المعادلة - المنصة التعليمية الأولى والرائدة في مصر المتخصصة في إعداد وتأهيل طلاب الدبلومات التجارية لاجتياز اختبار معادلة كلية التجارة بنجاح وتفوق.">
+  <meta name="keywords" content="معادلة كلية التجارة, ملوك المعادلة, دبلوم تجارة, كلية التجارة, امتحانات المعادلة, رياضيات المعادلة, جغرافيا المعادلة">
+  <meta name="author" content="ملوك المعادلة">
+  
+  <title>ملوك المعادلة | أقوى منصة لإعداد طلاب معادلة كلية التجارة</title>
+  
+  <!-- CDNs & Style Sheets -->
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Open Graph / SEO -->
+  <meta property="og:title" content="ملوك المعادلة | طريقك للنجاح في المعادلة يبدأ من هنا">
+  <meta property="og:description" content="أقوى منصة تعليمية متخصصة في إعداد طلاب معادلة كلية التجارة بأسلوب بابل شيت والامتحانات التفاعلية.">
+  <meta property="og:image" content="https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&q=80&w=600">
+  <meta property="og:type" content="website">
+</head>
+<body>
+
+  <!-- شريط التنقل العلوي -->
+  <header>
+    <div class="container nav-wrapper">
+      <a onclick="router.navigateTo('home')" class="logo" style="cursor: pointer;" id="nav-logo">
+        <i class="fas fa-crown logo-crown"></i>
+        <span>ملوك المعادلة</span>
+      </a>
+      
+      <nav>
+        <ul class="nav-menu">
+          <li><a onclick="router.navigateTo('home')" class="nav-link" id="nav-link-home">الرئيسية</a></li>
+          <li><a onclick="router.navigateTo('courses')" class="nav-link" id="nav-link-courses">الكورسات</a></li>
+          <li><a onclick="router.navigateTo('contact')" class="nav-link" id="nav-link-contact">اتصل بنا</a></li>
+        </ul>
+      </nav>
+      
+      <div class="nav-actions" id="nav-actions">
+        <!-- يتم تعبئتها ديناميكياً بواسطة التطبيق -->
+      </div>
+    </div>
+  </header>
+
+  <!-- المحتوى الرئيسي القابل للتغير ديناميكياً -->
+  <main id="app">
+    <!-- يتم عرض الصفحات والمكونات هنا عبر محرك التوجيه -->
+  </main>
+
+  <!-- تذييل الصفحة (Footer) -->
+  <footer>
+    <div class="container footer-grid">
+      <div class="footer-logo-desc">
+        <div class="logo" style="font-size: 22px; margin-bottom: 15px;">
+          <i class="fas fa-crown logo-crown"></i>
+          <span>ملوك المعادلة</span>
+        </div>
+        <p class="footer-desc">المنصة التعليمية الأولى والذكية لتأهيل طلاب الدبلومات والمعاهد الفنية التجارية لاجتياز اختبار المعادلة والالتحاق بكليات التجارة بالجامعات المصرية الحكومية.</p>
+      </div>
+      <div>
+        <h4 class="footer-title">روابط سريعة</h4>
+        <ul class="footer-links">
+          <li><a onclick="router.navigateTo('home')" class="footer-link" style="cursor: pointer;">الصفحة الرئيسية</a></li>
+          <li><a onclick="router.navigateTo('courses')" class="footer-link" style="cursor: pointer;">كل الكورسات</a></li>
+          <li><a onclick="router.navigateTo('contact')" class="footer-link" style="cursor: pointer;">تواصل معنا</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="footer-title">المواد الدراسية</h4>
+        <ul class="footer-links">
+          <li><a onclick="router.navigateTo('courses?category=math')" class="footer-link" style="cursor: pointer;">الرياضيات</a></li>
+          <li><a onclick="router.navigateTo('courses?category=geography')" class="footer-link" style="cursor: pointer;">الجغرافيا</a></li>
+          <li><a onclick="router.navigateTo('courses?category=english')" class="footer-link" style="cursor: pointer;">اللغة الإنجليزية</a></li>
+          <li><a onclick="router.navigateTo('courses?category=french')" class="footer-link" style="cursor: pointer;">اللغة الفرنسية</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="footer-title">الدعم والقوانين</h4>
+        <ul class="footer-links">
+          <li><a onclick="router.navigateTo('privacy')" class="footer-link" style="cursor: pointer;">سياسة الخصوصية</a></li>
+          <li><a onclick="router.navigateTo('terms')" class="footer-link" style="cursor: pointer;">الشروط والأحكام</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="container footer-bottom">
+      <p>&copy; 2026 ملوك المعادلة. جميع الحقوق محفوظة لطلابنا ومبدعينا.</p>
+    </div>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="data.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

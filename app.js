@@ -486,7 +486,7 @@ router.addRoute('lesson-player', (params) => {
     <div class="container player-layout">
       <div>
         <div class="video-container">
-          <video id="custom-video-player" class="custom-video" controls autoplay src="${lesson.videoUrl}"></video>
+          <video id="custom-video-player" class="custom-video" controls autoplay></video>
           <div class="video-overlay-protection">${app.currentUser.name} | ملوك المعادلة</div>
         </div>
         
@@ -511,7 +511,7 @@ router.addRoute('lesson-player', (params) => {
                   <h4 style="font-weight: 700;"><i class="far fa-file-pdf" style="color: var(--danger); margin-left: 8px;"></i> كتاب المنهج الرسمي - PDF</h4>
                   <p style="font-size: 12px; color: var(--text-secondary);">ملخص شامل لجميع فصول الدرس</p>
                 </div>
-                <a href="${lesson.pdfUrl}" target="_blank" class="btn btn-outline btn-text"><i class="fas fa-download"></i> تحميل ملخص PDF</a>
+                <a id="pdf-download-btn" href="#" target="_blank" class="btn btn-outline btn-text"><i class="fas fa-download"></i> تحميل ملخص PDF</a>
               </div>
               <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
                 <div>
@@ -550,19 +550,30 @@ router.addRoute('lesson-player', (params) => {
     </div>
   `;
 
-  // إعداد وتفعيل استرجاع زمن الفيديو
+  // إعداد وتفعيل استرجاع زمن الفيديو والمرفقات
   setTimeout(() => {
     const video = document.getElementById('custom-video-player');
-    if (video) {
-      if (lastTime > 0) {
-        video.currentTime = lastTime;
-      }
+    if (video && lesson.videoUrl) {
+      window.mediaStore.getMediaUrl(lesson.videoUrl).then(url => {
+        video.src = url;
+        if (lastTime > 0) {
+          video.currentTime = lastTime;
+        }
+      }).catch(err => console.error(err));
+
       video.addEventListener('timeupdate', () => {
         app.saveVideoPosition(course.id, lesson.id, video.currentTime);
       });
       video.addEventListener('ended', () => {
         app.handleVideoEnded(course.id, lesson.id);
       });
+    }
+
+    const pdfBtn = document.getElementById('pdf-download-btn');
+    if (pdfBtn && lesson.pdfUrl) {
+      window.mediaStore.getMediaUrl(lesson.pdfUrl).then(url => {
+        pdfBtn.href = url;
+      }).catch(err => console.error(err));
     }
   }, 100);
 });
@@ -682,9 +693,15 @@ router.addRoute('admin-dashboard', () => {
     return;
   }
 
+  if (!app.activeAdminTab) app.activeAdminTab = 'students';
+  if (!app.selectedAdminCourseId && app.data.courses.length > 0) {
+    app.selectedAdminCourseId = app.data.courses[0].id;
+  }
+
   const activeStudents = app.data.users?.filter(u => u.role === 'student') || [];
-  
-  // بناء جدول الطلاب والتحكم بهم
+  const selectedCourse = app.data.courses.find(c => c.id === app.selectedAdminCourseId);
+
+  // Tab 1: Students
   const studentRows = activeStudents.map(student => `
     <tr>
       <td>${student.name}</td>
@@ -698,11 +715,204 @@ router.addRoute('admin-dashboard', () => {
     </tr>
   `).join('');
 
+  // Tab 2: Courses & Lessons Management
+  let coursesTabHTML = '';
+  if (app.activeAdminTab === 'courses') {
+    const courseOptions = app.data.courses.map(c => `<option value="${c.id}" ${c.id === app.selectedAdminCourseId ? 'selected' : ''}>${c.title}</option>`).join('');
+    
+    let lessonsHTML = '';
+    if (selectedCourse) {
+      lessonsHTML = (selectedCourse.lessons || []).map((l, idx) => `
+        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 15px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <h4 style="font-weight: 700; font-size: 15px;">${idx + 1}. ${l.title}</h4>
+            <span style="font-size: 12px; color: var(--text-secondary);">المدة: ${l.duration || 'غير محددة'}</span>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-outline" style="padding: 6px 12px; font-size: 12px; border-color: var(--danger); color: var(--danger);" onclick="app.adminDeleteLesson('${selectedCourse.id}', '${l.id}')">حذف</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    coursesTabHTML = `
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 25px; margin-bottom: 30px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+          <div style="display: flex; align-items: center; gap: 10px; min-width: 250px;">
+            <label style="font-weight: 700; white-space: nowrap;">اختر المادة:</label>
+            <select class="form-input" style="padding: 8px; border-radius: 6px; border: 1px solid var(--border-color); width: 100%; background: var(--bg-primary); color: var(--text-primary);" onchange="app.selectedAdminCourseId = this.value; app.switchAdminTab('courses');">
+              ${courseOptions}
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="app.adminCreateCourse()"><i class="fas fa-plus"></i> إضافة كورس/مادة جديدة</button>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 30px; margin-top: 20px;">
+          <div>
+            <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 15px; border-bottom: 2px solid var(--primary-light); padding-bottom: 8px;">الدروس الحالية</h3>
+            ${lessonsHTML || '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">لا توجد دروس مضافة لهذه المادة بعد.</p>'}
+          </div>
+
+          <div style="background: var(--bg-primary); border: 1px solid var(--border-color); padding: 20px; border-radius: var(--radius-md);">
+            <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 15px;">إضافة درس جديد للمادة</h3>
+            <form id="add-lesson-form" onsubmit="event.preventDefault(); app.adminAddLesson(this);">
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label" style="font-size: 13px;">عنوان الدرس</label>
+                <input type="text" name="title" class="form-input" required placeholder="مثال: الدرس الأول: المحددات">
+              </div>
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label" style="font-size: 13px;">مدة الدرس</label>
+                <input type="text" name="duration" class="form-input" required placeholder="مثال: 45 دقيقة">
+              </div>
+              
+              <div style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px; background: var(--bg-secondary);">
+                <label class="form-label" style="font-size: 13px; font-weight: 700;">فيديو الدرس</label>
+                <div style="display: flex; gap: 15px; margin-bottom: 8px; font-size: 12px;">
+                  <label><input type="radio" name="video_source" value="file" checked onchange="document.getElementById('video-file-group').style.display='block'; document.getElementById('video-url-group').style.display='none';"> رفع من الجهاز</label>
+                  <label><input type="radio" name="video_source" value="url" onchange="document.getElementById('video-file-group').style.display='none'; document.getElementById('video-url-group').style.display='block';"> رابط مباشر</label>
+                </div>
+                <div id="video-file-group">
+                  <input type="file" name="video_file" accept="video/*" class="form-input" style="padding: 5px;">
+                </div>
+                <div id="video-url-group" style="display: none;">
+                  <input type="text" name="video_url" class="form-input" placeholder="https://example.com/video.mp4">
+                </div>
+              </div>
+
+              <div style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px; background: var(--bg-secondary);">
+                <label class="form-label" style="font-size: 13px; font-weight: 700;">ملف PDF المرفق</label>
+                <div style="display: flex; gap: 15px; margin-bottom: 8px; font-size: 12px;">
+                  <label><input type="radio" name="pdf_source" value="file" checked onchange="document.getElementById('pdf-file-group').style.display='block'; document.getElementById('pdf-url-group').style.display='none';"> رفع من الجهاز</label>
+                  <label><input type="radio" name="pdf_source" value="url" onchange="document.getElementById('pdf-file-group').style.display='none'; document.getElementById('pdf-url-group').style.display='block';"> رابط مباشر</label>
+                </div>
+                <div id="pdf-file-group">
+                  <input type="file" name="pdf_file" accept="application/pdf" class="form-input" style="padding: 5px;">
+                </div>
+                <div id="pdf-url-group" style="display: none;">
+                  <input type="text" name="pdf_url" class="form-input" placeholder="https://example.com/document.pdf">
+                </div>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label" style="font-size: 13px;">وصف الدرس / ملاحظات</label>
+                <textarea name="notes" class="form-input" rows="2" style="resize: none;" placeholder="ملاحظات تظهر للطالب..."></textarea>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label" style="font-size: 13px;">الواجب المنزلي</label>
+                <input type="text" name="homework" class="form-input" placeholder="مثال: حل تمارين صفحة 20">
+              </div>
+
+              <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;" id="lesson-submit-btn">
+                <i class="fas fa-save"></i> حفظ الدرس
+              </button>
+              <div id="upload-status" style="display: none; text-align: center; margin-top: 10px; color: var(--accent); font-weight: 700; font-size: 13px;">
+                <i class="fas fa-spinner fa-spin"></i> جاري حفظ الملفات وتخزينها في قاعدة البيانات المحلية...
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Tab 3: Exams Management
+  let examsTabHTML = '';
+  if (app.activeAdminTab === 'exams') {
+    const courseOptions = app.data.courses.map(c => `<option value="${c.id}" ${c.id === app.selectedAdminCourseId ? 'selected' : ''}>${c.title}</option>`).join('');
+    
+    const courseQuestions = app.data.questionBank.filter(q => q.courseId === app.selectedAdminCourseId);
+    
+    const questionsListHTML = courseQuestions.map((q, idx) => `
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 15px; margin-bottom: 15px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+          <h4 style="font-weight: 700; font-size: 15px; flex-grow: 1;">س ${idx + 1}: ${q.question}</h4>
+          <button class="btn btn-outline" style="padding: 4px 8px; font-size: 11px; border-color: var(--danger); color: var(--danger); margin-left: 10px;" onclick="app.adminDeleteQuestion('${q.id}')">حذف</button>
+        </div>
+        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 5px;">
+          <strong>الإجابة الصحيحة:</strong> <span style="color: var(--success); font-weight: 700;">${q.answer}</span>
+        </div>
+        ${q.options ? `<div style="font-size: 12px; color: var(--text-tertiary); margin-bottom: 8px;">الخيارات: ${q.options.join(' | ')}</div>` : ''}
+        <div style="background: var(--bg-primary); padding: 8px 12px; border-radius: 4px; font-size: 12px; line-height: 1.6;">
+          <strong>التفسير:</strong> ${q.explanation}
+        </div>
+      </div>
+    `).join('');
+
+    examsTabHTML = `
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 25px; margin-bottom: 30px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+          <div style="display: flex; align-items: center; gap: 10px; min-width: 250px;">
+            <label style="font-weight: 700; white-space: nowrap;">اختر المادة:</label>
+            <select class="form-input" style="padding: 8px; border-radius: 6px; border: 1px solid var(--border-color); width: 100%; background: var(--bg-primary); color: var(--text-primary);" onchange="app.selectedAdminCourseId = this.value; app.switchAdminTab('exams');">
+              ${courseOptions}
+            </select>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 30px; margin-top: 20px;">
+          <div>
+            <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 15px; border-bottom: 2px solid var(--primary-light); padding-bottom: 8px;">الأسئلة الحالية للامتحان التقييمي</h3>
+            ${questionsListHTML || '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">لا توجد أسئلة مضافة لهذه المادة بعد.</p>'}
+          </div>
+
+          <div style="background: var(--bg-primary); border: 1px solid var(--border-color); padding: 20px; border-radius: var(--radius-md);">
+            <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 15px;">إضافة سؤال جديد</h3>
+            <form onsubmit="event.preventDefault(); app.adminAddQuestion(this);">
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label" style="font-size: 13px;">نص السؤال</label>
+                <textarea name="question" class="form-input" rows="2" style="resize: none;" required placeholder="اكتب نص السؤال هنا..."></textarea>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label" style="font-size: 13px;">نوع السؤال</label>
+                <select name="type" class="form-input" onchange="app.toggleQuestionFormType(this.value);" style="background: var(--bg-secondary); color: var(--text-primary);">
+                  <option value="mcq">اختيار من متعدد (MCQ)</option>
+                  <option value="tf">صواب / خطأ</option>
+                </select>
+              </div>
+
+              <div id="mcq-options-container" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px; background: var(--bg-secondary);">
+                <label class="form-label" style="font-size: 13px; font-weight: 700;">خيارات السؤال الاختياري</label>
+                <div class="form-group" style="margin-bottom: 8px;">
+                  <input type="text" name="opt1" class="form-input" placeholder="الخيار الأول (مثال: 2×2)" required>
+                </div>
+                <div class="form-group" style="margin-bottom: 8px;">
+                  <input type="text" name="opt2" class="form-input" placeholder="الخيار الثاني (مثال: 3×3)" required>
+                </div>
+                <div class="form-group" style="margin-bottom: 8px;">
+                  <input type="text" name="opt3" class="form-input" placeholder="الخيار الثالث">
+                </div>
+                <div class="form-group" style="margin-bottom: 8px;">
+                  <input type="text" name="opt4" class="form-input" placeholder="الخيار الرابع">
+                </div>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label" style="font-size: 13px;">الإجابة الصحيحة</label>
+                <input type="text" name="answer" class="form-input" required placeholder="اكتب الإجابة الصحيحة تماماً كما كُتبت بالخيارات، أو 'صواب' / 'خطأ'">
+              </div>
+
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label" style="font-size: 13px;">طريقة الحل والتفسير</label>
+                <textarea name="explanation" class="form-input" rows="2" style="resize: none;" placeholder="اشرح للطالب طريقة الوصول للحل الصحيح..."></textarea>
+              </div>
+
+              <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">
+                <i class="fas fa-save"></i> حفظ السؤال في الامتحان
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   root.innerHTML = `
     <div class="container" style="padding: 40px 0;">
       <h2 style="font-size: 28px; font-weight: 800; margin-bottom: 25px;">لوحة تحكم الإدارة والتحليلات العامة</h2>
 
-      <div class="admin-metrics-grid">
+      <div class="admin-metrics-grid" style="margin-bottom: 30px;">
         <div class="metric-card">
           <div class="metric-info">
             <h4>إجمالي الطلاب</h4>
@@ -733,36 +943,56 @@ router.addRoute('admin-dashboard', () => {
         </div>
       </div>
 
-      <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 25px; margin-bottom: 40px;">
-        <h3 style="font-size: 20px; font-weight: 800; margin-bottom: 20px;">نظرة على إحصائيات التفاعل الأسبوعية</h3>
-        <div style="height: 150px; background-color: var(--bg-tertiary); border-radius: var(--radius-sm); display: flex; align-items: flex-end; justify-content: space-around; padding: 20px;">
-          <div style="width: 40px; height: 40%; background-color: var(--primary); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">السبت</div>
-          <div style="width: 40px; height: 60%; background-color: var(--primary); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">الأحد</div>
-          <div style="width: 40px; height: 85%; background-color: var(--primary); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">الإثنين</div>
-          <div style="width: 40px; height: 95%; background-color: var(--accent); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">اليوم</div>
+      <!-- نظام التبويب الداخلي -->
+      <div class="tab-nav" style="margin-bottom: 25px; display: flex; border-bottom: 1px solid var(--border-color); gap: 20px;">
+        <button class="tab-btn ${app.activeAdminTab === 'students' ? 'active' : ''}" onclick="app.switchAdminTab('students')">إدارة الحسابات والطلاب</button>
+        <button class="tab-btn ${app.activeAdminTab === 'courses' ? 'active' : ''}" onclick="app.switchAdminTab('courses')">إدارة المواد والدروس</button>
+        <button class="tab-btn ${app.activeAdminTab === 'exams' ? 'active' : ''}" onclick="app.switchAdminTab('exams')">إدارة الامتحانات والأسئلة</button>
+      </div>
+
+      <!-- محتوى تبويب إدارة الطلاب -->
+      <div id="admin-tab-students" style="display: ${app.activeAdminTab === 'students' ? 'block' : 'none'};">
+        <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 25px; margin-bottom: 30px;">
+          <h3 style="font-size: 20px; font-weight: 800; margin-bottom: 20px;">نظرة على إحصائيات التفاعل الأسبوعية</h3>
+          <div style="height: 150px; background-color: var(--bg-tertiary); border-radius: var(--radius-sm); display: flex; align-items: flex-end; justify-content: space-around; padding: 20px;">
+            <div style="width: 40px; height: 40%; background-color: var(--primary); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">السبت</div>
+            <div style="width: 40px; height: 60%; background-color: var(--primary); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">الأحد</div>
+            <div style="width: 40px; height: 85%; background-color: var(--primary); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">الإثنين</div>
+            <div style="width: 40px; height: 95%; background-color: var(--accent); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">اليوم</div>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+          <h3 style="font-size: 20px; font-weight: 800;">إدارة الحسابات والطلاب</h3>
+        </div>
+
+        <div class="admin-table-container">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>اسم الطالب</th>
+                <th>البريد الإلكتروني</th>
+                <th>الاشتراكات</th>
+                <th>إجراءات</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${studentRows.length ? studentRows : '<tr><td colspan="4" style="text-align: center;">لا يوجد طلاب مسجلين حالياً.</td></tr>'}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h3 style="font-size: 20px; font-weight: 800;">إدارة الحسابات والطلاب</h3>
-        <button class="btn btn-primary" onclick="app.adminCreateCourse()"><i class="fas fa-plus"></i> إضافة كورس جديد</button>
+      <!-- محتوى تبويب إدارة الكورسات والدروس -->
+      <div id="admin-tab-courses" style="display: ${app.activeAdminTab === 'courses' ? 'block' : 'none'};">
+        ${coursesTabHTML}
       </div>
 
-      <div class="admin-table-container">
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th>اسم الطالب</th>
-              <th>البريد الإلكتروني</th>
-              <th>الاشتراكات</th>
-              <th>إجراءات</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${studentRows.length ? studentRows : '<tr><td colspan="4" style="text-align: center;">لا يوجد طلاب مسجلين حالياً.</td></tr>'}
-          </tbody>
-        </table>
+      <!-- محتوى تبويب إدارة الامتحانات والأسئلة -->
+      <div id="admin-tab-exams" style="display: ${app.activeAdminTab === 'exams' ? 'block' : 'none'};">
+        ${examsTabHTML}
       </div>
+
     </div>
   `;
 });
@@ -770,10 +1000,14 @@ router.addRoute('admin-dashboard', () => {
 // 8. تسجيل الدخول
 router.addRoute('login', () => {
   const root = document.getElementById('app');
+  
+  // التحقق من خيار الدخول السريع
+  const showDemo = new URLSearchParams(window.location.search).get('demo') === 'true' || app.showDemoActive;
+
   root.innerHTML = `
     <div class="auth-container">
       <div class="auth-header">
-        <h2 style="font-size: 24px; font-weight: 800;">تسجيل الدخول</h2>
+        <h2 id="login-title" style="font-size: 24px; font-weight: 800; cursor: pointer;" onclick="app.handleTitleClick()">تسجيل الدخول</h2>
         <p style="font-size: 13px; color: var(--text-secondary); margin-top: 8px;">مرحباً بك مجدداً في ملوك المعادلة</p>
       </div>
       <form onsubmit="event.preventDefault(); app.login(this.email.value, this.password.value);">
@@ -796,7 +1030,7 @@ router.addRoute('login', () => {
       <p style="text-align: center; font-size: 13px; color: var(--text-secondary); margin-top: 25px;">
         ليس لديك حساب؟ <a onclick="router.navigateTo('register')" style="color: var(--primary); font-weight: 700; cursor: pointer;">إنشاء حساب جديد</a>
       </p>
-      <div style="margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 15px; text-align: center;">
+      <div id="demo-login-box" style="margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 15px; text-align: center; display: ${showDemo ? 'block' : 'none'};">
         <p style="font-size: 12px; color: var(--text-tertiary); margin-bottom: 10px;">أو سجل دخول سريعاً بـ:</p>
         <button class="btn btn-outline" style="width: 100%; font-size: 13px; margin-bottom: 8px;" onclick="document.querySelector('input[name=email]').value='student@molok.com'; document.querySelector('input[name=password]').value='123456';">طالب تجريبي</button>
         <button class="btn btn-outline" style="width: 100%; font-size: 13px;" onclick="document.querySelector('input[name=email]').value='admin@molok.com'; document.querySelector('input[name=password]').value='admin123';">مسؤول الإدارة</button>
@@ -804,6 +1038,175 @@ router.addRoute('login', () => {
     </div>
   `;
 });
+
+// دوال تفعيل الدخول السريع الخفي
+app.loginClickCount = 0;
+app.handleTitleClick = function() {
+  app.loginClickCount++;
+  if (app.loginClickCount >= 5) {
+    app.showDemoActive = true;
+    const box = document.getElementById('demo-login-box');
+    if (box) {
+      box.style.display = 'block';
+      alert('تم إظهار أزرار الدخول التجريبي السري بنجاح.');
+    }
+  }
+};
+
+// دوال لوحة الإدارة التفاعلية
+app.switchAdminTab = function(tabName) {
+  app.activeAdminTab = tabName;
+  router.handleRouting();
+};
+
+app.toggleQuestionFormType = function(type) {
+  const container = document.getElementById('mcq-options-container');
+  if (container) {
+    if (type === 'mcq') {
+      container.style.display = 'block';
+      container.querySelectorAll('input').forEach(i => i.setAttribute('required', 'true'));
+    } else {
+      container.style.display = 'none';
+      container.querySelectorAll('input').forEach(i => i.removeAttribute('required'));
+    }
+  }
+};
+
+app.adminAddLesson = function(form) {
+  const title = form.title.value;
+  const duration = form.duration.value;
+  const homework = form.homework.value || '';
+  const notes = form.notes.value || '';
+  const videoSource = form.video_source.value;
+  const pdfSource = form.pdf_source.value;
+  
+  const submitBtn = document.getElementById('lesson-submit-btn');
+  const uploadStatus = document.getElementById('upload-status');
+  
+  if (submitBtn) submitBtn.disabled = true;
+  if (uploadStatus) uploadStatus.style.display = 'block';
+
+  let videoPromise = Promise.resolve('');
+  let pdfPromise = Promise.resolve('');
+
+  if (videoSource === 'file') {
+    const file = form.video_file.files[0];
+    if (file) {
+      videoPromise = window.mediaStore.saveMedia(file);
+    } else {
+      alert('الرجاء اختيار ملف فيديو للرفع.');
+      if (submitBtn) submitBtn.disabled = false;
+      if (uploadStatus) uploadStatus.style.display = 'none';
+      return;
+    }
+  } else {
+    videoPromise = Promise.resolve(form.video_url.value);
+  }
+
+  if (pdfSource === 'file') {
+    const file = form.pdf_file.files[0];
+    if (file) {
+      pdfPromise = window.mediaStore.saveMedia(file);
+    } else {
+      alert('الرجاء اختيار ملف PDF للرفع.');
+      if (submitBtn) submitBtn.disabled = false;
+      if (uploadStatus) uploadStatus.style.display = 'none';
+      return;
+    }
+  } else {
+    pdfPromise = Promise.resolve(form.pdf_url.value);
+  }
+
+  Promise.all([videoPromise, pdfPromise]).then(([videoUrl, pdfUrl]) => {
+    const selectedCourse = app.data.courses.find(c => c.id === app.selectedAdminCourseId);
+    if (selectedCourse) {
+      if (!selectedCourse.lessons) selectedCourse.lessons = [];
+      const newLesson = {
+        id: 'lesson_' + Date.now(),
+        title,
+        duration,
+        videoUrl,
+        pdfUrl,
+        homework,
+        notes
+      };
+      selectedCourse.lessons.push(newLesson);
+      selectedCourse.stats.lessonsCount = selectedCourse.lessons.length;
+      app.save();
+      alert('تمت إضافة الدرس بنجاح!');
+      router.handleRouting();
+    }
+  }).catch(err => {
+    console.error(err);
+    alert('حدث خطأ أثناء حفظ الملفات: ' + err.message);
+  }).finally(() => {
+    if (submitBtn) submitBtn.disabled = false;
+    if (uploadStatus) uploadStatus.style.display = 'none';
+  });
+};
+
+app.adminDeleteLesson = function(courseId, lessonId) {
+  if (confirm('هل أنت متأكد من حذف هذا الدرس؟')) {
+    const course = app.data.courses.find(c => c.id === courseId);
+    if (course) {
+      const lesson = course.lessons.find(l => l.id === lessonId);
+      if (lesson) {
+        if (lesson.videoUrl && lesson.videoUrl.startsWith('local_file_')) {
+          window.mediaStore.deleteMedia(lesson.videoUrl).catch(e => console.error(e));
+        }
+        if (lesson.pdfUrl && lesson.pdfUrl.startsWith('local_file_')) {
+          window.mediaStore.deleteMedia(lesson.pdfUrl).catch(e => console.error(e));
+        }
+      }
+      course.lessons = course.lessons.filter(l => l.id !== lessonId);
+      course.stats.lessonsCount = course.lessons.length;
+      app.save();
+      alert('تم حذف الدرس بنجاح.');
+      router.handleRouting();
+    }
+  }
+};
+
+app.adminAddQuestion = function(form) {
+  const question = form.question.value;
+  const type = form.type.value;
+  const answer = form.answer.value;
+  const explanation = form.explanation.value || '';
+  
+  let options = null;
+  if (type === 'mcq') {
+    options = [form.opt1.value, form.opt2.value];
+    if (form.opt3.value) options.push(form.opt3.value);
+    if (form.opt4.value) options.push(form.opt4.value);
+  } else {
+    options = ['صواب', 'خطأ'];
+  }
+
+  const newQ = {
+    id: 'q_' + Date.now(),
+    courseId: app.selectedAdminCourseId,
+    type,
+    question,
+    options,
+    answer,
+    explanation,
+    difficulty: 'medium'
+  };
+
+  app.data.questionBank.push(newQ);
+  app.save();
+  alert('تمت إضافة السؤال بنجاح إلى بنك الأسئلة!');
+  router.handleRouting();
+};
+
+app.adminDeleteQuestion = function(qId) {
+  if (confirm('هل أنت متأكد من حذف هذا السؤال؟')) {
+    app.data.questionBank = app.data.questionBank.filter(q => q.id !== qId);
+    app.save();
+    alert('تم حذف السؤال بنجاح.');
+    router.handleRouting();
+  }
+};
 
 // 9. إنشاء حساب جديد
 router.addRoute('register', () => {

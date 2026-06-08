@@ -3,7 +3,7 @@ const defaultData = {
   courses: [
     {
       id: "math",
-      title: "الرياضيات العامة والخاصة",
+      title: "الرياضيات ",
       category: "math",
       categoryName: "الرياضيات",
       thumbnail: "https://images.unsplash.com/photo-1509228468518-180dd4864904?auto=format&fit=crop&q=80&w=600",
@@ -60,7 +60,7 @@ const defaultData = {
     },
     {
       id: "geography",
-      title: "جغرافيا مصر الطبيعية والبشرية",
+      title: "جغرافيا",
       category: "geography",
       categoryName: "الجغرافيا",
       thumbnail: "https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&q=80&w=600",
@@ -98,7 +98,7 @@ const defaultData = {
     },
     {
       id: "english",
-      title: "اللغة الإنجليزية الشاملة",
+      title: "اللغة الإنجليزية ",
       category: "english",
       categoryName: "الانجليزي",
       thumbnail: "https://images.unsplash.com/photo-1546410531-bb4caa6b424d?auto=format&fit=crop&q=80&w=600",
@@ -127,7 +127,7 @@ const defaultData = {
     },
     {
       id: "french",
-      title: "اللغة الفرنسية من الصفر للاحتراف",
+      title: "اللغة الفرنسية ",
       category: "french",
       categoryName: "الفرنساوي",
       thumbnail: "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?auto=format&fit=crop&q=80&w=600",

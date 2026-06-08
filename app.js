@@ -1246,25 +1246,92 @@ router.addRoute('register', () => {
 // 10. استعادة كلمة المرور
 router.addRoute('forgot-password', () => {
   const root = document.getElementById('app');
-  root.innerHTML = `
-    <div class="auth-container">
-      <div class="auth-header">
-        <h2 style="font-size: 24px; font-weight: 800;">استعادة كلمة المرور</h2>
-        <p style="font-size: 13px; color: var(--text-secondary); margin-top: 8px;">أدخل بريدك الإلكتروني وسنرسل لك رابط التعيين</p>
-      </div>
-      <form onsubmit="event.preventDefault(); alert('تم إرسال رابط تعيين كلمة المرور إلى بريدك الإلكتروني بنجاح!'); router.navigateTo('login');">
-        <div class="form-group">
-          <label class="form-label">البريد الإلكتروني</label>
-          <input type="email" name="email" class="form-input" placeholder="name@example.com" required>
+  if (!app.forgotPasswordStep) app.forgotPasswordStep = 'email';
+
+  if (app.forgotPasswordStep === 'email') {
+    root.innerHTML = `
+      <div class="auth-container">
+        <div class="auth-header">
+          <h2 style="font-size: 24px; font-weight: 800;">استعادة كلمة المرور</h2>
+          <p style="font-size: 13px; color: var(--text-secondary); margin-top: 8px;">أدخل بريدك الإلكتروني للتحقق وإعادة تعيين كلمة المرور</p>
         </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">إرسال رابط التعيين</button>
-      </form>
-      <p style="text-align: center; font-size: 13px; color: var(--text-secondary); margin-top: 25px;">
-        <a onclick="router.navigateTo('login')" style="color: var(--primary); font-weight: 700; cursor: pointer;">العودة لتسجيل الدخول</a>
-      </p>
-    </div>
-  `;
+        <form onsubmit="event.preventDefault(); app.submitForgotPasswordEmail(this.email.value);">
+          <div class="form-group">
+            <label class="form-label">البريد الإلكتروني</label>
+            <input type="email" name="email" class="form-input" placeholder="name@example.com" required>
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">التحقق من البريد</button>
+        </form>
+        <p style="text-align: center; font-size: 13px; color: var(--text-secondary); margin-top: 25px;">
+          <a onclick="app.forgotPasswordStep='email'; router.navigateTo('login')" style="color: var(--primary); font-weight: 700; cursor: pointer;">العودة لتسجيل الدخول</a>
+        </p>
+      </div>
+    `;
+  } else if (app.forgotPasswordStep === 'reset') {
+    root.innerHTML = `
+      <div class="auth-container">
+        <div class="auth-header">
+          <h2 style="font-size: 24px; font-weight: 800;">تعيين كلمة المرور</h2>
+          <p style="font-size: 13px; color: var(--text-secondary); margin-top: 8px;">أدخل كلمة المرور الجديدة للحساب (${app.forgotPasswordEmail})</p>
+        </div>
+        <form onsubmit="event.preventDefault(); app.submitNewPassword(this.password.value, this.confirm.value);">
+          <div class="form-group">
+            <label class="form-label">كلمة المرور الجديدة</label>
+            <input type="password" name="password" class="form-input" placeholder="••••••••" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">تأكيد كلمة المرور</label>
+            <input type="password" name="confirm" class="form-input" placeholder="••••••••" required>
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">حفظ وتعيين</button>
+        </form>
+        <p style="text-align: center; font-size: 13px; color: var(--text-secondary); margin-top: 25px;">
+          <a onclick="app.forgotPasswordStep='email'; app.forgotPasswordEmail=''; router.navigateTo('login')" style="color: var(--primary); font-weight: 700; cursor: pointer;">إلغاء والعودة</a>
+        </p>
+      </div>
+    `;
+  }
 });
+
+app.submitForgotPasswordEmail = function(email) {
+  const isDemoStudent = email === 'student@molok.com';
+  const isAdmin = email === 'admin@molok.com';
+  const foundUser = app.data.users?.find(u => u.email === email);
+
+  if (!isDemoStudent && !isAdmin && !foundUser) {
+    alert("عذراً، هذا البريد الإلكتروني غير مسجل لدينا في قاعدة البيانات.");
+    return;
+  }
+
+  app.forgotPasswordEmail = email;
+  app.forgotPasswordStep = 'reset';
+  router.handleRouting();
+};
+
+app.submitNewPassword = function(newPassword, confirmPassword) {
+  if (newPassword !== confirmPassword) {
+    alert("كلمتا المرور غير متطابقتين.");
+    return;
+  }
+
+  const email = app.forgotPasswordEmail;
+  if (email === 'student@molok.com') {
+    alert("تنبيه: تم محاكاة التعيين بنجاح للحساب التجريبي (كلمة المرور الافتراضية تبقى 123456).");
+  } else if (email === 'admin@molok.com') {
+    alert("تنبيه: تم محاكاة التعيين بنجاح لحساب المسؤول العام (كلمة المرور الافتراضية تبقى admin123).");
+  } else {
+    const user = app.data.users?.find(u => u.email === email);
+    if (user) {
+      user.password = newPassword;
+      app.save();
+    }
+  }
+
+  alert("تم إعادة تعيين كلمة المرور بنجاح! يمكنك الآن تسجيل الدخول بها.");
+  app.forgotPasswordStep = 'email';
+  app.forgotPasswordEmail = '';
+  router.navigateTo('login');
+};
 
 // 11. صفحات سياسة الخصوصية والشروط والأحكام و اتصل بنا
 router.addRoute('privacy', () => {

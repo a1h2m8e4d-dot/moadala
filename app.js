@@ -150,9 +150,9 @@ router.addRoute('home', () => {
     <section class="hero">
       <div class="container hero-grid">
         <div class="hero-content">
-          <span class="hero-tag"><i class="fas fa-graduation-cap"></i> رفيقك الأول للتجارة</span>
+          <span class="hero-tag" style="background-color: rgba(16, 185, 129, 0.1); color: var(--success); border-color: rgba(16, 185, 129, 0.2);"><i class="fas fa-heart" style="color: var(--danger);"></i> المنصة مجانية بالكامل لوجه الله تعالى ومساعدة للطلاب</span>
           <h1 class="hero-title">طريقك للنجاح في المعادلة <span>يبدأ من هنا</span></h1>
-          <p class="hero-subtitle">أقوى منصة تعليمية متخصصة في إعداد طلاب معادلة كلية التجارة في مصر، مع نخبة من الأساتذة ومناهج شاملة واختبارات تفاعلية متكاملة.</p>
+          <p class="hero-subtitle">أقوى منصة تعليمية متخصصة ومجانية بالكامل لوجه الله تعالى لمساعدة طلاب الدبلومات والمعاهد الفنية في اجتياز معادلة كلية التجارة وتأهيلهم بنخبة من أفضل الأساتذة.</p>
           <div class="hero-buttons">
             <button class="btn btn-primary btn-accent" onclick="router.navigateTo('register')">ابدأ الآن مجاناً</button>
             <button class="btn btn-outline" onclick="router.navigateTo('courses')">شاهد الكورسات</button>

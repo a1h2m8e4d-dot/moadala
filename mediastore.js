@@ -124,4 +124,3 @@ class IndexedDBMediaStore {
 
 const mediaStore = new IndexedDBMediaStore();
 window.mediaStore = mediaStore;
-export default mediaStore;

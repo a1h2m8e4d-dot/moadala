@@ -4,24 +4,22 @@ import router from './router.js';
 class AppState {
   constructor() {
     this.data = JSON.parse(localStorage.getItem('molok_data')) || defaultData;
-    this.currentUser = JSON.parse(localStorage.getItem('molok_user')) || null;
-    this.currentCourseId = null;
-    this.currentLessonId = null;
-    this.quizState = {
-      questions: [],
-      currentIdx: 0,
-      answers: {},
-      timeRemaining: 0,
-      timerInterval: null
-    };
+    this.currentUser = JSON.parse(localStorage.getItem('molok_user')) || null; // الأدمن فقط
+    this.selectedAdminCourseId = null; // للتوافق
+    this.activeAdminTab = 'mahad'; // 'mahad', 'diploma', 'settings'
     this.theme = localStorage.getItem('molok_theme') || 'light';
-    this.wishlist = JSON.parse(localStorage.getItem('molok_wishlist')) || [];
+    this.currentSubjectId = null;
+    this.currentLessonId = null;
+    
+    // تهيئة gapi و GIS عند تحميل الصفحة
+    this.tokenClient = null;
+    this.gapiInited = false;
+    this.gisInited = false;
   }
 
   save() {
     localStorage.setItem('molok_data', JSON.stringify(this.data));
     localStorage.setItem('molok_user', JSON.stringify(this.currentUser));
-    localStorage.setItem('molok_wishlist', JSON.stringify(this.wishlist));
   }
 
   toggleTheme() {
@@ -43,50 +41,16 @@ class AppState {
   }
 
   login(email, password) {
-    const user = this.data.users?.find(u => u.email === email && u.password === password);
-    if (user) {
-      if (user.suspended) {
-        alert("عذراً، تم تجميد هذا الحساب مؤقتاً. يرجى التواصل مع الدعم.");
-        return false;
-      }
-      this.currentUser = user;
+    if (email === 'admin@molok.com' && password === 'admin123') {
+      this.currentUser = { name: "مدير المنصة", email, role: 'admin' };
       this.save();
       this.updateNavbar();
-      router.navigateTo('student-dashboard');
-      return true;
-    }
-    // حساب تجريبي سريع في حال لم تكن مسجلة مسبقاً
-    if (email === 'student@molok.com' && password === '123456') {
-      this.currentUser = { name: "طالب تجريبي", email, role: 'student', progress: {}, certificates: [], id: "demo-student" };
-      this.save();
-      this.updateNavbar();
-      router.navigateTo('student-dashboard');
-      return true;
-    } else if (email === 'admin@molok.com' && password === 'admin123') {
-      this.currentUser = { name: "المدير العام", email, role: 'admin', id: "admin-id" };
-      this.save();
-      this.updateNavbar();
+      alert("تم تسجيل الدخول بنجاح بلوحة التحكم.");
       router.navigateTo('admin-dashboard');
       return true;
     }
-    alert("بيانات الدخول غير صحيحة.");
+    alert("بيانات الدخول غير صحيحة. حساب الأدمن فقط هو المتاح.");
     return false;
-  }
-
-  register(name, email, password) {
-    if (!this.data.users) this.data.users = [];
-    if (this.data.users.find(u => u.email === email)) {
-      alert("البريد الإلكتروني مسجل بالفعل.");
-      return false;
-    }
-    const newUser = { id: 'u_' + Date.now(), name, email, password, role: 'student', progress: {}, certificates: [] };
-    this.data.users.push(newUser);
-    this.currentUser = newUser;
-    this.save();
-    this.updateNavbar();
-    alert("تم إنشاء الحساب بنجاح!");
-    router.navigateTo('student-dashboard');
-    return true;
   }
 
   logout() {
@@ -100,14 +64,13 @@ class AppState {
     const navActions = document.getElementById('nav-actions');
     if (!navActions) return;
 
-    if (this.currentUser) {
-      const dashboardLink = this.currentUser.role === 'admin' ? 'admin-dashboard' : 'student-dashboard';
+    if (this.currentUser && this.currentUser.role === 'admin') {
       navActions.innerHTML = `
         <button class="theme-toggle" onclick="app.toggleTheme()" title="تغيير المظهر">
           <i class="fas ${this.theme === 'light' ? 'fa-moon' : 'fa-sun'}"></i>
         </button>
-        <span class="user-greeting" style="font-weight: 700; color: var(--text-secondary); margin-left: 10px;">أهلاً، ${this.currentUser.name}</span>
-        <button class="btn btn-outline" onclick="router.navigateTo('${dashboardLink}')">لوحة التحكم</button>
+        <span class="user-greeting" style="font-weight: 700; color: var(--text-secondary); margin-left: 10px;">أهلاً، الأدمن</span>
+        <button class="btn btn-outline" onclick="router.navigateTo('admin-dashboard')">لوحة التحكم</button>
         <button class="btn btn-text" onclick="app.logout()"><i class="fas fa-sign-out-alt"></i> خروج</button>
       `;
     } else {
@@ -115,9 +78,61 @@ class AppState {
         <button class="theme-toggle" onclick="app.toggleTheme()" title="تغيير المظهر">
           <i class="fas ${this.theme === 'light' ? 'fa-moon' : 'fa-sun'}"></i>
         </button>
-        <button class="btn btn-text" onclick="router.navigateTo('login')">تسجيل الدخول</button>
-        <button class="btn btn-primary" onclick="router.navigateTo('register')">ابدأ مجاناً</button>
+        <button class="btn btn-primary" onclick="router.navigateTo('login')">تسجيل دخول الأدمن</button>
       `;
+    }
+  }
+
+  // تهيئة مكتبات Google
+  initGoogleClient() {
+    const settings = this.data.gdrive_settings;
+    if (!settings || !settings.clientId) return;
+
+    try {
+      // 1. تهيئة GAPI client
+      if (typeof gapi !== 'undefined' && !this.gapiInited) {
+        gapi.load('client', async () => {
+          try {
+            await gapi.client.init({
+              apiKey: settings.apiKey,
+              discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+            });
+            this.gapiInited = true;
+            console.log('GAPI client loaded successfully');
+          } catch (err) {
+            console.error('Error initializing GAPI client:', err);
+          }
+        });
+      }
+
+      // 2. تهيئة GIS Token Client
+      if (typeof google !== 'undefined' && !this.gisInited) {
+        this.tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: settings.clientId,
+          scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive',
+          callback: (response) => {
+            if (response.error !== undefined) {
+              alert('حدث خطأ أثناء الاتصال بـ Google: ' + response.error);
+              return;
+            }
+            this.data.gdrive_settings.token = response.access_token;
+            this.save();
+            alert('تم الحصول على تصريح الوصول بنجاح! يمكنك الآن رفع الملفات مباشرة إلى Google Drive.');
+            router.handleRouting();
+          },
+        });
+        this.gisInited = true;
+      }
+    } catch (e) {
+      console.error('Google client script initialization failed: ', e);
+    }
+  }
+
+  requestGoogleToken() {
+    if (this.tokenClient) {
+      this.tokenClient.requestAccessToken({ prompt: 'consent' });
+    } else {
+      alert('يرجى التأكد من كتابة Client ID بشكل صحيح وحفظ الإعدادات أولاً.');
     }
   }
 }
@@ -125,15 +140,15 @@ class AppState {
 const app = new AppState();
 window.app = app;
 
-// تفعيل وتأصيل المظهر المناسب عند التحميل
 document.addEventListener('DOMContentLoaded', () => {
   app.applyTheme();
   app.updateNavbar();
+  setTimeout(() => app.initGoogleClient(), 1000);
 });
 
-// تعريف صفحات المنصة والتفاعلات
-
-// 1. الصفحة الرئيسية
+// ==========================================
+// 1. الصفحة الرئيسية (Home Page)
+// ==========================================
 router.addRoute('home', () => {
   const root = document.getElementById('app');
   let faqHTML = app.data.faq.map((item, idx) => `
@@ -150,12 +165,14 @@ router.addRoute('home', () => {
     <section class="hero">
       <div class="container hero-grid">
         <div class="hero-content">
-          <span class="hero-tag" style="background-color: rgba(16, 185, 129, 0.1); color: var(--success); border-color: rgba(16, 185, 129, 0.2);"><i class="fas fa-heart" style="color: var(--danger);"></i> المنصة مجانية بالكامل لوجه الله تعالى ومساعدة للطلاب</span>
-          <h1 class="hero-title">طريقك للنجاح في المعادلة <span>يبدأ من هنا</span></h1>
-          <p class="hero-subtitle">أقوى منصة تعليمية متخصصة ومجانية بالكامل لوجه الله تعالى لمساعدة طلاب الدبلومات والمعاهد الفنية في اجتياز معادلة كلية التجارة وتأهيلهم بنخبة من أفضل الأساتذة.</p>
+          <span class="hero-tag" style="background-color: rgba(16, 185, 129, 0.1); color: var(--success); border-color: rgba(16, 185, 129, 0.2);">
+            <i class="fas fa-heart" style="color: var(--danger);"></i> المنصة مجانية بالكامل لوجه الله لخدمة طلاب المعادلة
+          </span>
+          <h1 class="hero-title">منصة <span>ملوك المعادلة</span> التعليمية</h1>
+          <p class="hero-subtitle">المنصة الرائدة والأولى لطلاب معادلة المعاهد الفنية ودبلومات المدارس التجارية. نمهد لك الطريق للالتحاق بكلية التجارة بنخبة من أفضل الدروس والملخصات المباشرة مجاناً بدون تسجيل حساب.</p>
           <div class="hero-buttons">
-            <button class="btn btn-primary btn-accent" onclick="router.navigateTo('register')">ابدأ الآن مجاناً</button>
-            <button class="btn btn-outline" onclick="router.navigateTo('courses')">شاهد الكورسات</button>
+            <button class="btn btn-primary btn-accent" onclick="router.navigateTo('category?type=mahad')">معادلة المعاهد</button>
+            <button class="btn btn-outline" onclick="router.navigateTo('category?type=diploma')">معادلة الدبلومات</button>
           </div>
         </div>
         <div class="hero-illustration">
@@ -165,99 +182,38 @@ router.addRoute('home', () => {
       </div>
     </section>
 
-    <section class="container" style="margin-bottom: 80px;">
-      <div class="stats-bar">
-        <div class="stats-grid">
-          <div class="stat-item">
-            <div class="stat-number" id="stat-students">${app.data.statistics.students}+</div>
-            <div class="stat-label">طالب نشط</div>
-          </div>
-          <div class="stat-item">
-            <div class="stat-number">${app.data.statistics.courses}</div>
-            <div class="stat-label">كورسات متخصصة</div>
-          </div>
-          <div class="stat-item">
-            <div class="stat-number">${app.data.statistics.lessons}+</div>
-            <div class="stat-label">درس مرئي</div>
-          </div>
-          <div class="stat-item">
-            <div class="stat-number">${app.data.statistics.exams}+</div>
-            <div class="stat-label">اختبار إلكتروني</div>
-          </div>
-          <div class="stat-item">
-            <div class="stat-number" style="color: var(--success);">${app.data.statistics.successRate}%</div>
-            <div class="stat-label">نسبة النجاح</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="features-section">
-      <div class="container">
-        <div class="section-header">
-          <span class="section-subtitle">لماذا ملوك المعادلة؟</span>
-          <h2 class="section-title">مميزات المنصة التعليمية المتكاملة</h2>
-        </div>
-        <div class="features-grid">
-          <div class="feature-card">
-            <div class="feature-icon-wrapper"><i class="fas fa-book-open"></i></div>
-            <h3 class="feature-card-title">شرح مبسط ومنظم</h3>
-            <p class="feature-card-desc">فيديوهات مصممة بأسلوب ممتع يربط بين الفهم وحل الأسئلة بسرعة واحترافية.</p>
-          </div>
-          <div class="feature-card">
-            <div class="feature-icon-wrapper"><i class="fas fa-file-signature"></i></div>
-            <h3 class="feature-card-title">اختبارات إلكترونية</h3>
-            <p class="feature-card-desc">اختبارات دورية تحاكي النظام الحقيقي بابل شيت مع تصحيح فوري وشرح مفصل للمسائل.</p>
-          </div>
-          <div class="feature-card">
-            <div class="feature-icon-wrapper"><i class="fas fa-chart-line"></i></div>
-            <h3 class="feature-card-title">متابعة مستوى الطالب</h3>
-            <p class="feature-card-desc">لوحة تحكم خاصة ترصد تقدمك الدراسي والدروس المتبقية وتقييم مستواك الفعلي أولاً بأول.</p>
-          </div>
-          <div class="feature-card">
-            <div class="feature-icon-wrapper"><i class="fas fa-graduation-cap"></i></div>
-            <h3 class="feature-card-title">شهادات إتمام الكورس</h3>
-            <p class="feature-card-desc">احصل على شهادة تفاعلية موثقة برقم تعريفي فور إتمامك كافة الدروس والاختبارات.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="container" style="padding: 80px 0;">
+    <!-- أقسام الدراسة الرئيسية -->
+    <section class="container" style="padding: 40px 0 80px 0;">
       <div class="section-header">
-        <span class="section-subtitle">آراء الملوك</span>
-        <h2 class="section-title">قصص نجاح طلابنا في كلية التجارة</h2>
+        <span class="section-subtitle">اختر مسارك التعليمي</span>
+        <h2 class="section-title">أقسام ومواد المعادلة</h2>
       </div>
       <div class="features-grid">
-        <div class="feature-card" style="border-radius: var(--radius-md);">
-          <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
-            <i class="fas fa-star" style="color: var(--accent);"></i>
-            <i class="fas fa-star" style="color: var(--accent);"></i>
-            <i class="fas fa-star" style="color: var(--accent);"></i>
-            <i class="fas fa-star" style="color: var(--accent);"></i>
-            <i class="fas fa-star" style="color: var(--accent);"></i>
+        <div class="feature-card" style="cursor: pointer; text-align: center; padding: 40px 20px;" onclick="router.navigateTo('category?type=mahad')">
+          <div class="feature-icon-wrapper" style="margin: 0 auto 20px auto; background-color: var(--primary-light); color: var(--primary);">
+            <i class="fas fa-university" style="font-size: 24px;"></i>
           </div>
-          <p style="font-size: 14px; line-height: 1.8; color: var(--text-secondary); margin-bottom: 20px;">"المنصة ممتازة جداً، بفضل الله وبفضل شرح الأساتذة تم قبولى بكلية التجارة جامعة القاهرة بعد نجاحي بالمعادلة."</p>
-          <h4 style="font-weight: 700;">كريم ممدوح - دفعة 2025</h4>
+          <h3 class="feature-card-title" style="font-size: 22px; font-weight: 800; margin-bottom: 15px;">معادلة المعاهد الفنية</h3>
+          <p class="feature-card-desc">تحتوي على المواد المخصصة لطلبة المعاهد: المحاسبة، إدارة الأعمال، الرياضيات، والاقتصاد.</p>
+          <button class="btn btn-outline" style="margin-top: 20px;">عرض المواد <i class="fas fa-arrow-left" style="margin-right: 8px;"></i></button>
         </div>
-        <div class="feature-card" style="border-radius: var(--radius-md);">
-          <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
-            <i class="fas fa-star" style="color: var(--accent);"></i>
-            <i class="fas fa-star" style="color: var(--accent);"></i>
-            <i class="fas fa-star" style="color: var(--accent);"></i>
-            <i class="fas fa-star" style="color: var(--accent);"></i>
-            <i class="fas fa-star" style="color: var(--accent);"></i>
+
+        <div class="feature-card" style="cursor: pointer; text-align: center; padding: 40px 20px;" onclick="router.navigateTo('category?type=diploma')">
+          <div class="feature-icon-wrapper" style="margin: 0 auto 20px auto; background-color: rgba(245, 158, 11, 0.15); color: var(--accent);">
+            <i class="fas fa-graduation-cap" style="font-size: 24px;"></i>
           </div>
-          <p style="font-size: 14px; line-height: 1.8; color: var(--text-secondary); margin-bottom: 20px;">"بنك الأسئلة الإلكتروني والاختبارات الأسبوعية كانت أفضل وسيلة للتدرب على نظام البابل شيت."</p>
-          <h4 style="font-weight: 700;">سارة جمال - جامعة عين شمس</h4>
+          <h3 class="feature-card-title" style="font-size: 22px; font-weight: 800; margin-bottom: 15px;">معادلة الدبلومات التجارية</h3>
+          <p class="feature-card-desc">تحتوي على المواد المقررة لطلبة الدبلومات: اللغة الإنجليزية، اللغة الفرنسية، الرياضيات، والجغرافيا.</p>
+          <button class="btn btn-outline" style="margin-top: 20px;">عرض المواد <i class="fas fa-arrow-left" style="margin-right: 8px;"></i></button>
         </div>
       </div>
     </section>
 
+    <!-- الأسئلة الشائعة -->
     <section class="container" style="margin-bottom: 80px;">
       <div class="section-header">
         <span class="section-subtitle">الأسئلة الشائعة</span>
-        <h2 class="section-title">كل ما تريد معرفته عن المعادلة</h2>
+        <h2 class="section-title">كل ما تريد معرفته عن المعادلة والمنصة</h2>
       </div>
       <div style="max-width: 800px; margin: 0 auto;">
         ${faqHTML}
@@ -266,426 +222,224 @@ router.addRoute('home', () => {
   `;
 });
 
-// 2. الكورسات والمناهج
-router.addRoute('courses', (params) => {
+// ==========================================
+// 2. صفحة الفئة (معادلة المعاهد أو الدبلومات)
+// ==========================================
+router.addRoute('category', (params) => {
   const root = document.getElementById('app');
-  const activeCat = params.category || 'all';
+  const type = params.type || 'mahad';
+  
+  const title = type === 'mahad' ? 'معادلة المعاهد الفنية' : 'معادلة الدبلومات التجارية';
+  const subtitle = type === 'mahad' 
+    ? 'المناهج المعتمدة والدروس لطلاب معاهد السنتين الفنية التجارية للالتحاق بكلية التجارة.'
+    : 'منهج الأربع مواد المقررة على طلاب دبلومات المدارس الفنية التجارية للالتحاق بكلية التجارة.';
 
-  const categories = [
-    { id: 'all', name: 'الكل' },
-    { id: 'math', name: 'الرياضيات' },
-    { id: 'geography', name: 'الجغرافيا' },
-    { id: 'english', name: 'الانجليزي' },
-    { id: 'french', name: 'الفرنساوي' }
-  ];
+  const filteredSubjects = app.data.subjects.filter(s => s.category === type);
+  
+  // أيقونات وصور افتراضية للمواد
+  const getSubjectIcon = (subjectId) => {
+    if (subjectId.includes('math')) return 'fa-calculator';
+    if (subjectId.includes('accounting')) return 'fa-file-invoice-dollar';
+    if (subjectId.includes('business')) return 'fa-briefcase';
+    if (subjectId.includes('economics')) return 'fa-chart-line';
+    if (subjectId.includes('english')) return 'fa-language';
+    if (subjectId.includes('french')) return 'fa-globe-europe';
+    if (subjectId.includes('geography')) return 'fa-map-marked-alt';
+    return 'fa-book';
+  };
 
-  const filteredCourses = activeCat === 'all' 
-    ? app.data.courses 
-    : app.data.courses.filter(c => c.category === activeCat);
-
-  const catButtons = categories.map(cat => `
-    <button class="cat-btn ${activeCat === cat.id ? 'active' : ''}" 
-      onclick="router.navigateTo('courses?category=${cat.id}')">${cat.name}</button>
-  `).join('');
-
-  const courseCards = filteredCourses.map(course => {
-    const isWish = app.wishlist.includes(course.id) ? 'fas' : 'far';
+  const cards = filteredSubjects.map(sub => {
+    const lessonsCount = app.data.lessons.filter(l => l.subject_id === sub.id).length;
     return `
-      <div class="course-card">
-        <div class="course-banner">
-          <img src="${course.thumbnail}" alt="${course.title}">
-          <span class="course-badge">${course.categoryName}</span>
-          <button style="position: absolute; left: 15px; top: 15px; border: none; background: white; border-radius: 50%; width: 35px; height: 35px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 5px rgba(0,0,0,0.2);" onclick="app.toggleWishlist('${course.id}', event)">
-            <i class="${isWish} fa-heart" style="color: #ef4444;"></i>
-          </button>
+      <div class="feature-card subject-card" onclick="router.navigateTo('lessons?subject=${sub.id}')" style="cursor: pointer; display: flex; align-items: center; gap: 20px; padding: 25px;">
+        <div class="feature-icon-wrapper" style="margin: 0; min-width: 60px; height: 60px; font-size: 24px;">
+          <i class="fas ${getSubjectIcon(sub.id)}"></i>
         </div>
-        <div class="course-body">
-          <h3 class="course-title">${course.title}</h3>
-          <div class="course-instructor">
-            <i class="fas fa-chalkboard-teacher" style="color: var(--accent);"></i>
-            <span>${course.instructor.name}</span>
-          </div>
-          <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">${course.description}</p>
-          <div class="course-meta">
-            <div class="course-meta-item"><i class="far fa-clock"></i> <span>${course.stats.duration}</span></div>
-            <div class="course-meta-item"><i class="far fa-play-circle"></i> <span>${course.stats.lessonsCount} درس</span></div>
-            <div class="course-meta-item"><i class="fas fa-star"></i> <span>${course.stats.rating}</span></div>
-          </div>
-          <button class="btn btn-primary" style="margin-top: 15px; width: 100%;" onclick="router.navigateTo('course-details?id=${course.id}')">تفاصيل الكورس</button>
+        <div style="text-align: right; flex-grow: 1;">
+          <h3 style="font-weight: 800; font-size: 18px; margin-bottom: 5px;">${sub.name}</h3>
+          <span style="font-size: 13px; color: var(--text-secondary);"><i class="far fa-play-circle" style="margin-left: 5px;"></i> ${lessonsCount} درس مرئي وملخص PDF</span>
         </div>
+        <i class="fas fa-chevron-left" style="color: var(--text-tertiary);"></i>
       </div>
     `;
   }).join('');
 
   root.innerHTML = `
     <div class="container" style="padding: 60px 0;">
-      <div class="section-header">
-        <span class="section-subtitle">المناهج المعتمدة</span>
-        <h2 class="section-title">كورسات ملوك المعادلة</h2>
+      <button class="btn btn-text" onclick="router.navigateTo('home')" style="margin-bottom: 30px;"><i class="fas fa-arrow-right"></i> العودة للرئيسية</button>
+      
+      <div class="section-header" style="text-align: right; margin-bottom: 40px;">
+        <span class="section-subtitle">${title}</span>
+        <h2 class="section-title" style="font-size: 32px; font-weight: 800;">المواد الدراسية المقررة</h2>
+        <p style="color: var(--text-secondary); max-width: 700px; margin-top: 10px; line-height: 1.8;">${subtitle}</p>
       </div>
 
-      <div class="category-filter">
-        ${catButtons}
-      </div>
-
-      <div class="courses-grid">
-        ${courseCards.length ? courseCards : '<p style="grid-column: 1/-1; text-align: center; color: var(--text-secondary);">لا توجد كورسات في هذا القسم حالياً.</p>'}
-      </div>
-    </div>
-  `;
-});
-
-// 3. تفاصيل الكورس
-router.addRoute('course-details', (params) => {
-  const root = document.getElementById('app');
-  const course = app.data.courses.find(c => c.id === params.id);
-  if (!course) {
-    root.innerHTML = '<div class="container"><p>الكورس غير موجود.</p></div>';
-    return;
-  }
-
-  // التحقق من اشتراك الطالب
-  const isEnrolled = app.currentUser && app.currentUser.progress && app.currentUser.progress[course.id];
-
-  const lessonRows = course.lessons.map((lesson, idx) => `
-    <div class="lesson-row">
-      <div class="lesson-info">
-        <div class="lesson-icon"><i class="fas fa-play"></i></div>
-        <div>
-          <h4 style="font-weight: 700; font-size: 15px;">${lesson.title}</h4>
-          <span style="font-size: 12px; color: var(--text-tertiary);"><i class="far fa-clock"></i> ${lesson.duration}</span>
-        </div>
-      </div>
-      ${isEnrolled 
-        ? `<button class="btn btn-outline" onclick="router.navigateTo('lesson-player?courseId=${course.id}&lessonId=${lesson.id}')">مشاهدة الآن</button>`
-        : `<span style="font-size: 12px; color: var(--text-tertiary);"><i class="fas fa-lock"></i> مقفل</span>`
-      }
-    </div>
-  `).join('');
-
-  const enrollBtn = isEnrolled
-    ? `<button class="btn btn-success" style="width: 100%; margin-bottom: 15px; background-color: var(--success); color: white;" onclick="router.navigateTo('lesson-player?courseId=${course.id}&lessonId=${course.lessons[0].id}')"><i class="fas fa-play-circle"></i> متابعة الدراسة</button>`
-    : `<button class="btn btn-primary" style="width: 100%; margin-bottom: 15px;" onclick="app.enrollInCourse('${course.id}')"><i class="fas fa-plus"></i> الاشتراك في الكورس مجاناً</button>`;
-
-  root.innerHTML = `
-    <div class="course-details-hero">
-      <div class="container course-details-grid">
-        <div>
-          <span class="hero-tag" style="margin-bottom: 15px;">${course.categoryName}</span>
-          <h1 style="font-size: 32px; font-weight: 800; margin-bottom: 15px;">${course.title}</h1>
-          <p style="color: var(--text-secondary); line-height: 1.8; margin-bottom: 25px;">${course.description}</p>
-          
-          <div style="display: flex; gap: 20px; align-items: center; margin-bottom: 30px;">
-            <img src="${course.instructor.avatar}" style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover;" alt="">
-            <div>
-              <h4 style="font-weight: 700;">بإشراف: ${course.instructor.name}</h4>
-              <span style="font-size: 13px; color: var(--text-tertiary);">${course.instructor.title}</span>
-            </div>
-          </div>
-        </div>
-        <div>
-          <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 25px; box-shadow: var(--card-shadow);">
-            <img src="${course.thumbnail}" style="width: 100%; border-radius: var(--radius-sm); margin-bottom: 20px;" alt="">
-            ${enrollBtn}
-            <div style="display: flex; flex-direction: column; gap: 12px; font-size: 14px; color: var(--text-secondary); border-top: 1px solid var(--border-color); padding-top: 15px;">
-              <div><i class="fas fa-video" style="color: var(--accent); margin-left: 8px;"></i> ${course.lessons.length} درس مرئي عالي الدقة</div>
-              <div><i class="far fa-file-pdf" style="color: var(--accent); margin-left: 8px;"></i> ملخصات وكتب إلكترونية PDF</div>
-              <div><i class="fas fa-question-circle" style="color: var(--accent); margin-left: 8px;"></i> اختبارات وتقييمات بابل شيت</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="container" style="padding: 50px 0;">
-      <div class="course-details-grid">
-        <div>
-          <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 20px;">محتوى الكورس</h2>
-          <div class="curriculum-accordion">
-            ${lessonRows}
-          </div>
-        </div>
-        <div>
-          <h2 style="font-size: 24px; font-weight: 800; margin-bottom: 20px;">عن المحاضر</h2>
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 25px;">
-            <p style="font-size: 14px; line-height: 1.8; color: var(--text-secondary);">${course.instructor.bio}</p>
-          </div>
-        </div>
+      <div class="courses-grid" style="grid-template-columns: repeat(2, 1fr); gap: 20px; margin-top: 20px;">
+        ${cards}
       </div>
     </div>
   `;
 });
 
-// 4. مشغل المناهج المتقدم
-router.addRoute('lesson-player', (params) => {
+// ==========================================
+// 3. صفحة عرض الدروس (Lessons Page)
+// ==========================================
+router.addRoute('lessons', (params) => {
   const root = document.getElementById('app');
-  if (!app.currentUser) {
-    alert("يرجى تسجيل الدخول أولاً.");
-    router.navigateTo('login');
+  const subjectId = params.subject;
+  const subject = app.data.subjects.find(s => s.id === subjectId);
+  
+  if (!subject) {
+    root.innerHTML = `<div class="container" style="padding: 80px 0; text-align: center;"><p>المادة غير موجودة.</p></div>`;
     return;
   }
 
-  const course = app.data.courses.find(c => c.id === params.courseId);
-  if (!course) {
-    root.innerHTML = '<div class="container"><p>الكورس غير موجود.</p></div>';
-    return;
-  }
+  // تصفية الدروس وترتيبها تصاعدياً
+  const subjectLessons = app.data.lessons
+    .filter(l => l.subject_id === subjectId)
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
 
-  // التحقق من اشتراك الطالب
-  if (!app.currentUser.progress[course.id]) {
-    alert("أنت غير مشترك في هذا الكورس بعد.");
-    router.navigateTo(`course-details?id=${course.id}`);
-    return;
-  }
+  app.currentSubjectId = subjectId;
 
-  const lesson = course.lessons.find(l => l.id === params.lessonId) || course.lessons[0];
-  app.currentCourseId = course.id;
-  app.currentLessonId = lesson.id;
+  // جلب الدرس المختار أو عرض الأول تلقائياً
+  const activeLessonId = params.lesson || (subjectLessons.length > 0 ? subjectLessons[0].id : null);
+  const activeLesson = subjectLessons.find(l => l.id === activeLessonId);
 
-  // قائمة التشغيل الجانبية
-  const playlistItems = course.lessons.map(l => {
-    const isCompleted = app.currentUser.progress[course.id]?.completedLessons?.includes(l.id);
-    const isActive = l.id === lesson.id;
+  // إعداد قائمة الدروس
+  const lessonsMenu = subjectLessons.map((l, index) => {
+    const isActive = l.id === activeLessonId;
     return `
-      <div class="playlist-item ${isActive ? 'active' : ''}" 
-        onclick="router.navigateTo('lesson-player?courseId=${course.id}&lessonId=${l.id}')">
-        <i class="${isCompleted ? 'fas fa-check-circle' : 'far fa-play-circle'}" style="color: ${isCompleted ? 'var(--success)' : 'inherit'};"></i>
-        <div style="flex-grow: 1;">
-          <h5 style="font-weight: 700; font-size: 14px;">${l.title}</h5>
-          <span style="font-size: 11px; opacity: 0.8;">${l.duration}</span>
+      <div class="playlist-item ${isActive ? 'active' : ''}" onclick="router.navigateTo('lessons?subject=${subjectId}&lesson=${l.id}')" style="cursor: pointer; padding: 15px; border-radius: 8px; margin-bottom: 8px; display: flex; align-items: center; gap: 12px; transition: all 0.2s;">
+        <div class="lesson-num" style="background: ${isActive ? 'var(--primary)' : 'var(--bg-tertiary)'}; color: ${isActive ? 'white' : 'var(--text-primary)'}; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700;">
+          ${index + 1}
         </div>
+        <div style="flex-grow: 1; text-align: right;">
+          <h4 style="font-weight: 700; font-size: 14px; margin-bottom: 2px;">${l.title}</h4>
+        </div>
+        <i class="far fa-play-circle" style="opacity: 0.7;"></i>
       </div>
     `;
   }).join('');
 
-  // استرجاع زمن المشاهدة السابق للدرس
-  const lastTime = app.currentUser.progress[course.id]?.lastPositions?.[lesson.id] || 0;
-
-  // جلب أسئلة المنتدى المتعلقة بهذا الكورس
-  const qas = app.data.community.filter(q => q.courseId === course.id);
-  const qaHTML = qas.map(q => {
-    const bestReply = q.replies.find(r => r.isBest);
-    return `
-      <div class="qa-card" onclick="app.showQAThread('${q.id}')" style="cursor: pointer;">
-        <h4 style="font-weight: 700; font-size: 16px; margin-bottom: 8px;">${q.title}</h4>
-        <div class="qa-author">
-          <span><i class="far fa-user"></i> ${q.author}</span>
-          <span><i class="far fa-calendar"></i> ${q.date}</span>
-          <span><i class="far fa-comments"></i> ${q.replies.length} ردود</span>
-        </div>
-        ${bestReply ? `
-          <div style="background-color: var(--primary-light); padding: 12px; border-radius: var(--radius-sm); margin-top: 10px; font-size: 13px;">
-            <strong>إجابة الأستاذ:</strong> ${bestReply.content}
-          </div>
-        ` : ''}
-      </div>
-    `;
-  }).join('');
-
-  root.innerHTML = `
-    <div class="container player-layout">
-      <div>
-        <div class="video-container">
-          <video id="custom-video-player" class="custom-video" controls autoplay></video>
-          <div class="video-overlay-protection">${app.currentUser.name} | ملوك المعادلة</div>
-        </div>
-        
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
-          <h2 style="font-size: 22px; font-weight: 800;">${lesson.title}</h2>
-          <button class="btn btn-success" id="btn-complete-lesson" onclick="app.markLessonComplete('${course.id}', '${lesson.id}')">
-            <i class="fas fa-check"></i> تحديد كـ مكتمل
-          </button>
-        </div>
-
-        <div class="lesson-resources-tabs">
-          <div class="tab-nav">
-            <button class="tab-btn active" onclick="app.switchTab('resources')">المرفقات والكتب</button>
-            <button class="tab-btn" onclick="app.switchTab('notes')">ملاحظات المحاضرة</button>
-            <button class="tab-btn" onclick="app.switchTab('qa')">مناقشات الطلاب (${qas.length})</button>
-          </div>
-          
-          <div id="tab-content-resources" class="tab-panel">
-            <div style="display: flex; flex-direction: column; gap: 15px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
-                <div>
-                  <h4 style="font-weight: 700;"><i class="far fa-file-pdf" style="color: var(--danger); margin-left: 8px;"></i> كتاب المنهج الرسمي - PDF</h4>
-                  <p style="font-size: 12px; color: var(--text-secondary);">ملخص شامل لجميع فصول الدرس</p>
-                </div>
-                <a id="pdf-download-btn" href="#" target="_blank" class="btn btn-outline btn-text"><i class="fas fa-download"></i> تحميل ملخص PDF</a>
-              </div>
-              <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px; background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
-                <div>
-                  <h4 style="font-weight: 700;"><i class="fas fa-tasks" style="color: var(--accent); margin-left: 8px;"></i> الواجب والتمارين المنزلية</h4>
-                  <p style="font-size: 12px; color: var(--text-secondary);">${lesson.homework}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div id="tab-content-notes" class="tab-panel" style="display: none; background: var(--bg-secondary); padding: 20px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
-            <p style="line-height: 1.8; font-size: 14px;">${lesson.notes}</p>
-          </div>
-
-          <div id="tab-content-qa" class="tab-panel" style="display: none;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-              <h3 style="font-size: 18px; font-weight: 700;">اسأل واستفسر</h3>
-              <button class="btn btn-primary" onclick="app.openNewQAQuestion('${course.id}')"><i class="fas fa-plus"></i> طرح سؤال جديد</button>
-            </div>
-            ${qaHTML}
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <div class="playlist-card">
-          <div class="playlist-header">فهرس الكورس</div>
-          <div style="max-height: 350px; overflow-y: auto;">
-            ${playlistItems}
-          </div>
-          <button class="btn btn-accent" style="width: 100%; margin-top: 20px;" onclick="router.navigateTo('exam?courseId=${course.id}')">
-            <i class="fas fa-file-alt"></i> الانتقال للامتحان التقييمي
-          </button>
-        </div>
-      </div>
-    </div>
-  `;
-
-  // إعداد وتفعيل استرجاع زمن الفيديو والمرفقات
-  setTimeout(() => {
-    const video = document.getElementById('custom-video-player');
-    if (video && lesson.videoUrl) {
-      window.mediaStore.getMediaUrl(lesson.videoUrl).then(url => {
-        video.src = url;
-        if (lastTime > 0) {
-          video.currentTime = lastTime;
-        }
-      }).catch(err => console.error(err));
-
-      video.addEventListener('timeupdate', () => {
-        app.saveVideoPosition(course.id, lesson.id, video.currentTime);
-      });
-      video.addEventListener('ended', () => {
-        app.handleVideoEnded(course.id, lesson.id);
-      });
+  // استخراج معرّف فيديو يوتيوب
+  const getYoutubeEmbedUrl = (url) => {
+    if (!url) return '';
+    let videoId = '';
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    if (match && match[2].length === 11) {
+      videoId = match[2];
+    } else {
+      videoId = url; // كحالة احتياطية إذا أدخل الأدمن المعرّف مباشرة
     }
-
-    const pdfBtn = document.getElementById('pdf-download-btn');
-    if (pdfBtn && lesson.pdfUrl) {
-      window.mediaStore.getMediaUrl(lesson.pdfUrl).then(url => {
-        pdfBtn.href = url;
-      }).catch(err => console.error(err));
-    }
-  }, 100);
-});
-
-// 5. نظام الاختبارات والتقييم الذاتي
-router.addRoute('exam', (params) => {
-  const root = document.getElementById('app');
-  if (!app.currentUser) {
-    alert("يرجى تسجيل الدخول أولاً.");
-    router.navigateTo('login');
-    return;
-  }
-
-  const questions = app.data.questionBank.filter(q => q.courseId === params.courseId);
-  if (!questions.length) {
-    root.innerHTML = '<div class="container"><p>لا توجد أسئلة متوفرة لهذا الكورس حالياً.</p></div>';
-    return;
-  }
-
-  // تهيئة حالة الاختبار
-  app.quizState = {
-    courseId: params.courseId,
-    questions: questions,
-    currentIdx: 0,
-    answers: {},
-    timeRemaining: questions.length * 90, // 90 ثانية لكل سؤال
-    timerInterval: null
+    return `https://www.youtube.com/embed/${videoId}?rel=0`;
   };
 
-  app.startExamTimer();
-  app.renderQuizQuestion();
-});
-
-// 6. لوحة تحكم الطالب
-router.addRoute('student-dashboard', () => {
-  const root = document.getElementById('app');
-  if (!app.currentUser) {
-    router.navigateTo('login');
-    return;
-  }
-
-  // حساب معدلات النجاح والتقدم
-  const enrolledCourses = Object.keys(app.currentUser.progress || {});
-  const courseCards = enrolledCourses.map(cId => {
-    const course = app.data.courses.find(c => c.id === cId);
-    if (!course) return '';
-    const progress = app.currentUser.progress[cId];
-    const compCount = progress.completedLessons?.length || 0;
-    const totalCount = course.lessons.length;
-    const pct = totalCount > 0 ? Math.round((compCount / totalCount) * 100) : 0;
-    
-    return `
-      <div class="feature-card" style="padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
-        <div>
-          <h4 style="font-weight: 700; margin-bottom: 10px;">${course.title}</h4>
-          <span style="font-size: 12px; color: var(--text-tertiary);">معدل التقدم: ${pct}%</span>
-          <div class="progress-bar-container">
-            <div class="progress-bar-fill" style="width: ${pct}%;"></div>
-          </div>
-        </div>
-        <div style="margin-top: 20px; display: flex; gap: 10px;">
-          <button class="btn btn-primary btn-sm" onclick="router.navigateTo('lesson-player?courseId=${course.id}')" style="font-size: 13px; padding: 6px 12px;">متابعة</button>
-          ${pct >= 100 ? `<button class="btn btn-accent btn-sm" onclick="app.generateCertificate('${course.id}')" style="font-size: 13px; padding: 6px 12px;">الشهادة</button>` : ''}
-        </div>
+  const playerHTML = activeLesson ? `
+    <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 20px; box-shadow: var(--card-shadow);">
+      <!-- مشغل اليوتيوب المدمج -->
+      <div class="video-container" style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 8px; background: #000; box-shadow: 0 4px 15px rgba(0,0,0,0.15);">
+        <iframe 
+          style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;"
+          src="${getYoutubeEmbedUrl(activeLesson.youtube_url)}" 
+          title="YouTube video player" 
+          frameborder="0" 
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+          allowfullscreen>
+        </iframe>
       </div>
-    `;
-  }).join('');
+
+      <div style="margin-top: 20px; text-align: right;">
+        <h2 style="font-size: 24px; font-weight: 800; color: var(--text-primary); margin-bottom: 8px;">${activeLesson.title}</h2>
+        ${activeLesson.description ? `<p style="color: var(--text-secondary); font-size: 14px; line-height: 1.8; margin-bottom: 20px;">${activeLesson.description}</p>` : ''}
+      </div>
+
+      <div style="display: flex; gap: 15px; border-top: 1px solid var(--border-color); padding-top: 20px; margin-top: 20px;">
+        ${activeLesson.pdf_drive_url 
+          ? `<a href="${activeLesson.pdf_drive_url}" target="_blank" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 8px;">
+               <i class="far fa-file-pdf"></i>
+               <span>تحميل / قراءة ملخص الـ PDF</span>
+             </a>`
+          : `<button class="btn btn-outline" disabled style="opacity: 0.5; display: inline-flex; align-items: center; gap: 8px;">
+               <i class="far fa-file-pdf"></i>
+               <span>لا يوجد ملف PDF مرفق</span>
+             </button>`
+        }
+      </div>
+    </div>
+  ` : `
+    <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 50px 20px; text-align: center; color: var(--text-secondary);">
+      <i class="fas fa-book-reader" style="font-size: 48px; margin-bottom: 15px; color: var(--text-tertiary);"></i>
+      <p style="font-size: 16px;">الرجاء اختيار درس من القائمة الجانبية لبدء الدراسة.</p>
+    </div>
+  `;
 
   root.innerHTML = `
-    <div class="container dashboard-layout">
-      <div class="dashboard-sidebar">
-        <div style="text-align: center; margin-bottom: 30px;">
-          <div style="width: 80px; height: 80px; border-radius: 50%; background-color: var(--primary-light); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 32px; margin: 0 auto 15px auto;">
-            <i class="fas fa-user-graduate"></i>
-          </div>
-          <h3 style="font-weight: 800;">${app.currentUser.name}</h3>
-          <span style="font-size: 12px; color: var(--text-tertiary);">طالب مسجل</span>
-        </div>
-        <ul class="dashboard-sidebar-menu">
-          <li class="dashboard-sidebar-item active" onclick="router.navigateTo('student-dashboard')"><i class="fas fa-columns"></i> لوحة التحكم</li>
-          <li class="dashboard-sidebar-item" onclick="router.navigateTo('courses')"><i class="fas fa-graduation-cap"></i> استعراض الكورسات</li>
-        </ul>
+    <div class="container" style="padding: 50px 0;">
+      <button class="btn btn-text" onclick="router.navigateTo('category?type=${subject.category}')" style="margin-bottom: 25px;"><i class="fas fa-arrow-right"></i> العودة إلى المواد</button>
+
+      <div class="section-header" style="text-align: right; margin-bottom: 30px;">
+        <span class="section-subtitle">${subject.category === 'mahad' ? 'معادلة المعاهد' : 'معادلة الدبلومات'}</span>
+        <h1 class="section-title" style="font-size: 32px; font-weight: 800; display: inline-flex; align-items: center; gap: 10px;">
+          <span>مادة ${subject.name}</span>
+        </h1>
       </div>
 
-      <div>
-        <h2 style="font-size: 28px; font-weight: 800; margin-bottom: 25px;">مرحباً بك مجدداً في ملوك المعادلة</h2>
-        
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 40px;">
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); padding: 20px; border-radius: var(--radius-md); text-align: center;">
-            <span style="font-size: 13px; color: var(--text-secondary);">الكورسات المشترك بها</span>
-            <h3 style="font-size: 32px; font-weight: 800; margin-top: 5px; color: var(--primary);">${enrolledCourses.length}</h3>
-          </div>
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); padding: 20px; border-radius: var(--radius-md); text-align: center;">
-            <span style="font-size: 13px; color: var(--text-secondary);">شهادات الإتمام</span>
-            <h3 style="font-size: 32px; font-weight: 800; margin-top: 5px; color: var(--success);">${app.currentUser.certificates?.length || 0}</h3>
-          </div>
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); padding: 20px; border-radius: var(--radius-md); text-align: center;">
-            <span style="font-size: 13px; color: var(--text-secondary);">المفضلة</span>
-            <h3 style="font-size: 32px; font-weight: 800; margin-top: 5px; color: var(--accent);">${app.wishlist.length}</h3>
-          </div>
+      <div class="player-layout" style="display: grid; grid-template-columns: 2.2fr 1fr; gap: 30px;">
+        <!-- المحتوى الرئيسي (الفيديو) -->
+        <div>
+          ${playerHTML}
         </div>
 
-        <h3 style="font-size: 20px; font-weight: 800; margin-bottom: 20px;">مناهجك الدراسية الحالية</h3>
-        <div class="features-grid">
-          ${courseCards.length ? courseCards : '<p style="grid-column: 1/-1; text-align: center; color: var(--text-secondary);">أنت غير مشترك في أي كورس حالياً. استعرض الكورسات وابدأ الآن.</p>'}
+        <!-- قائمة الدروس الجانبية -->
+        <div>
+          <div class="playlist-card" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--card-shadow);">
+            <div class="playlist-header" style="padding: 18px; font-weight: 800; font-size: 16px; border-bottom: 1px solid var(--border-color); background: var(--bg-tertiary); text-align: right;">
+              <i class="fas fa-list-ol" style="margin-left: 8px; color: var(--primary);"></i> فهرس الدروس
+            </div>
+            <div style="max-height: 480px; overflow-y: auto; padding: 15px;">
+              ${lessonsMenu.length ? lessonsMenu : '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">لا توجد دروس حالية للمادة.</p>'}
+            </div>
+          </div>
         </div>
       </div>
     </div>
   `;
 });
 
-// 7. لوحة تحكم الإدارة (Admin Dashboard)
+// ==========================================
+// 4. صفحة تسجيل دخول الأدمن
+// ==========================================
+router.addRoute('login', () => {
+  const root = document.getElementById('app');
+  root.innerHTML = `
+    <div class="auth-container" style="max-width: 450px; margin: 80px auto; padding: 40px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); box-shadow: var(--card-shadow);">
+      <div class="auth-header" style="text-align: center; margin-bottom: 30px;">
+        <i class="fas fa-crown logo-crown" style="font-size: 40px; color: var(--accent); margin-bottom: 15px;"></i>
+        <h2 style="font-size: 24px; font-weight: 800;">تسجيل دخول الإدارة</h2>
+        <p style="font-size: 13px; color: var(--text-secondary); margin-top: 8px;">مخصص لإضافة وتعديل الدروس والملخصات</p>
+      </div>
+      <form onsubmit="event.preventDefault(); app.login(this.email.value, this.password.value);">
+        <div class="form-group" style="margin-bottom: 20px;">
+          <label class="form-label">البريد الإلكتروني للأدمن</label>
+          <input type="email" name="email" class="form-input" placeholder="admin@molok.com" required style="width: 100%;">
+        </div>
+        <div class="form-group" style="margin-bottom: 20px;">
+          <label class="form-label">كلمة المرور</label>
+          <input type="password" name="password" class="form-input" placeholder="••••••••" required style="width: 100%;">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px; padding: 12px;">دخول</button>
+      </form>
+      <div style="margin-top: 20px; text-align: center; font-size: 12px; color: var(--text-tertiary);">
+        <span>ملاحظة تجريبية: البريد admin@molok.com وكلمة المرور admin123</span>
+      </div>
+    </div>
+  `;
+});
+
+// ==========================================
+// 5. لوحة تحكم الأدمن (Admin Dashboard)
+// ==========================================
 router.addRoute('admin-dashboard', () => {
   const root = document.getElementById('app');
   if (!app.currentUser || app.currentUser.role !== 'admin') {
@@ -693,687 +447,528 @@ router.addRoute('admin-dashboard', () => {
     return;
   }
 
-  if (!app.activeAdminTab) app.activeAdminTab = 'students';
-  if (!app.selectedAdminCourseId && app.data.courses.length > 0) {
-    app.selectedAdminCourseId = app.data.courses[0].id;
+  // تصفية المواد بالقسم النشط
+  const activeCategory = app.activeAdminTab === 'settings' ? 'mahad' : app.activeAdminTab;
+  const adminSubjects = app.data.subjects.filter(s => s.category === activeCategory);
+  
+  if (!app.selectedAdminSubjectId && adminSubjects.length > 0) {
+    app.selectedAdminSubjectId = adminSubjects[0].id;
   }
 
-  const activeStudents = app.data.users?.filter(u => u.role === 'student') || [];
-  const selectedCourse = app.data.courses.find(c => c.id === app.selectedAdminCourseId);
+  // إذا تبدلت المواد لتصنيف آخر ولم يجد المادة
+  if (!adminSubjects.find(s => s.id === app.selectedAdminSubjectId) && adminSubjects.length > 0) {
+    app.selectedAdminSubjectId = adminSubjects[0].id;
+  }
 
-  // Tab 1: Students
-  const studentRows = activeStudents.map(student => `
-    <tr>
-      <td>${student.name}</td>
-      <td>${student.email}</td>
-      <td>${Object.keys(student.progress || {}).length} كورسات</td>
-      <td>
-        <button class="btn btn-outline" style="padding: 6px 12px; font-size: 12px; border-color: ${student.suspended ? 'var(--success)' : 'var(--danger)'}; color: ${student.suspended ? 'var(--success)' : 'var(--danger)'};" onclick="app.toggleUserSuspension('${student.id}')">
-          ${student.suspended ? 'تنشيط الحساب' : 'تجميد الحساب'}
-        </button>
-      </td>
-    </tr>
+  const selectedSub = app.data.subjects.find(s => s.id === app.selectedAdminSubjectId);
+
+  // قائمة خيارات المواد للـ Select Menu
+  const subjectOptions = adminSubjects.map(s => `
+    <option value="${s.id}" ${s.id === app.selectedAdminSubjectId ? 'selected' : ''}>${s.name}</option>
   `).join('');
 
-  // Tab 2: Courses & Lessons Management
-  let coursesTabHTML = '';
-  if (app.activeAdminTab === 'courses') {
-    const courseOptions = app.data.courses.map(c => `<option value="${c.id}" ${c.id === app.selectedAdminCourseId ? 'selected' : ''}>${c.title}</option>`).join('');
-    
-    let lessonsHTML = '';
-    if (selectedCourse) {
-      lessonsHTML = (selectedCourse.lessons || []).map((l, idx) => `
-        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 15px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
-          <div>
-            <h4 style="font-weight: 700; font-size: 15px;">${idx + 1}. ${l.title}</h4>
-            <span style="font-size: 12px; color: var(--text-secondary);">المدة: ${l.duration || 'غير محددة'}</span>
-          </div>
-          <div style="display: flex; gap: 10px;">
-            <button class="btn btn-outline" style="padding: 6px 12px; font-size: 12px; border-color: var(--danger); color: var(--danger);" onclick="app.adminDeleteLesson('${selectedCourse.id}', '${l.id}')">حذف</button>
-          </div>
+  // قائمة الدروس في هذه المادة للتعديل والترتيب
+  let lessonsListHTML = '';
+  if (selectedSub) {
+    const subLessons = app.data.lessons
+      .filter(l => l.subject_id === selectedSub.id)
+      .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    lessonsListHTML = subLessons.map((l, index) => `
+      <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 15px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="text-align: right;">
+          <h4 style="font-weight: 700; font-size: 15px; color: var(--text-primary);">${index + 1}. ${l.title}</h4>
+          <span style="font-size: 12px; color: var(--text-secondary); margin-left: 10px;">
+            <i class="fab fa-youtube" style="color: #ff0000; margin-left: 4px;"></i> يوتيوب
+          </span>
+          <span style="font-size: 12px; color: var(--text-secondary);">
+            <i class="far fa-file-pdf" style="color: var(--danger); margin-left: 4px;"></i> ${l.pdf_drive_url ? 'ملف PDF متوفر' : 'لا يوجد PDF'}
+          </span>
         </div>
-      `).join('');
-    }
-
-    coursesTabHTML = `
-      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 25px; margin-bottom: 30px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
-          <div style="display: flex; align-items: center; gap: 10px; min-width: 250px;">
-            <label style="font-weight: 700; white-space: nowrap;">اختر المادة:</label>
-            <select class="form-input" style="padding: 8px; border-radius: 6px; border: 1px solid var(--border-color); width: 100%; background: var(--bg-primary); color: var(--text-primary);" onchange="app.selectedAdminCourseId = this.value; app.switchAdminTab('courses');">
-              ${courseOptions}
-            </select>
-          </div>
-          <button class="btn btn-primary" onclick="app.adminCreateCourse()"><i class="fas fa-plus"></i> إضافة كورس/مادة جديدة</button>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 30px; margin-top: 20px;">
-          <div>
-            <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 15px; border-bottom: 2px solid var(--primary-light); padding-bottom: 8px;">الدروس الحالية</h3>
-            ${lessonsHTML || '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">لا توجد دروس مضافة لهذه المادة بعد.</p>'}
-          </div>
-
-          <div style="background: var(--bg-primary); border: 1px solid var(--border-color); padding: 20px; border-radius: var(--radius-md);">
-            <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 15px;">إضافة درس جديد للمادة</h3>
-            <form id="add-lesson-form" onsubmit="event.preventDefault(); app.adminAddLesson(this);">
-              <div class="form-group" style="margin-bottom: 12px;">
-                <label class="form-label" style="font-size: 13px;">عنوان الدرس</label>
-                <input type="text" name="title" class="form-input" required placeholder="مثال: الدرس الأول: المحددات">
-              </div>
-              <div class="form-group" style="margin-bottom: 12px;">
-                <label class="form-label" style="font-size: 13px;">مدة الدرس</label>
-                <input type="text" name="duration" class="form-input" required placeholder="مثال: 45 دقيقة">
-              </div>
-              
-              <div style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px; background: var(--bg-secondary);">
-                <label class="form-label" style="font-size: 13px; font-weight: 700;">فيديو الدرس</label>
-                <div style="display: flex; gap: 15px; margin-bottom: 8px; font-size: 12px;">
-                  <label><input type="radio" name="video_source" value="file" checked onchange="document.getElementById('video-file-group').style.display='block'; document.getElementById('video-url-group').style.display='none';"> رفع من الجهاز</label>
-                  <label><input type="radio" name="video_source" value="url" onchange="document.getElementById('video-file-group').style.display='none'; document.getElementById('video-url-group').style.display='block';"> رابط مباشر</label>
-                </div>
-                <div id="video-file-group">
-                  <input type="file" name="video_file" accept="video/*" class="form-input" style="padding: 5px;">
-                </div>
-                <div id="video-url-group" style="display: none;">
-                  <input type="text" name="video_url" class="form-input" placeholder="https://example.com/video.mp4">
-                </div>
-              </div>
-
-              <div style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px; background: var(--bg-secondary);">
-                <label class="form-label" style="font-size: 13px; font-weight: 700;">ملف PDF المرفق</label>
-                <div style="display: flex; gap: 15px; margin-bottom: 8px; font-size: 12px;">
-                  <label><input type="radio" name="pdf_source" value="file" checked onchange="document.getElementById('pdf-file-group').style.display='block'; document.getElementById('pdf-url-group').style.display='none';"> رفع من الجهاز</label>
-                  <label><input type="radio" name="pdf_source" value="url" onchange="document.getElementById('pdf-file-group').style.display='none'; document.getElementById('pdf-url-group').style.display='block';"> رابط مباشر</label>
-                </div>
-                <div id="pdf-file-group">
-                  <input type="file" name="pdf_file" accept="application/pdf" class="form-input" style="padding: 5px;">
-                </div>
-                <div id="pdf-url-group" style="display: none;">
-                  <input type="text" name="pdf_url" class="form-input" placeholder="https://example.com/document.pdf">
-                </div>
-              </div>
-
-              <div class="form-group" style="margin-bottom: 12px;">
-                <label class="form-label" style="font-size: 13px;">وصف الدرس / ملاحظات</label>
-                <textarea name="notes" class="form-input" rows="2" style="resize: none;" placeholder="ملاحظات تظهر للطالب..."></textarea>
-              </div>
-
-              <div class="form-group" style="margin-bottom: 12px;">
-                <label class="form-label" style="font-size: 13px;">الواجب المنزلي</label>
-                <input type="text" name="homework" class="form-input" placeholder="مثال: حل تمارين صفحة 20">
-              </div>
-
-              <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;" id="lesson-submit-btn">
-                <i class="fas fa-save"></i> حفظ الدرس
-              </button>
-              <div id="upload-status" style="display: none; text-align: center; margin-top: 10px; color: var(--accent); font-weight: 700; font-size: 13px;">
-                <i class="fas fa-spinner fa-spin"></i> جاري حفظ الملفات وتخزينها في قاعدة البيانات المحلية...
-              </div>
-            </form>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  // Tab 3: Exams Management
-  let examsTabHTML = '';
-  if (app.activeAdminTab === 'exams') {
-    const courseOptions = app.data.courses.map(c => `<option value="${c.id}" ${c.id === app.selectedAdminCourseId ? 'selected' : ''}>${c.title}</option>`).join('');
-    
-    const courseQuestions = app.data.questionBank.filter(q => q.courseId === app.selectedAdminCourseId);
-    
-    const questionsListHTML = courseQuestions.map((q, idx) => `
-      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 15px; margin-bottom: 15px;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
-          <h4 style="font-weight: 700; font-size: 15px; flex-grow: 1;">س ${idx + 1}: ${q.question}</h4>
-          <button class="btn btn-outline" style="padding: 4px 8px; font-size: 11px; border-color: var(--danger); color: var(--danger); margin-left: 10px;" onclick="app.adminDeleteQuestion('${q.id}')">حذف</button>
-        </div>
-        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 5px;">
-          <strong>الإجابة الصحيحة:</strong> <span style="color: var(--success); font-weight: 700;">${q.answer}</span>
-        </div>
-        ${q.options ? `<div style="font-size: 12px; color: var(--text-tertiary); margin-bottom: 8px;">الخيارات: ${q.options.join(' | ')}</div>` : ''}
-        <div style="background: var(--bg-primary); padding: 8px 12px; border-radius: 4px; font-size: 12px; line-height: 1.6;">
-          <strong>التفسير:</strong> ${q.explanation}
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <!-- أزرار الترتيب -->
+          <button class="btn btn-outline" style="padding: 4px 8px; font-size: 11px;" onclick="app.moveLesson('${l.id}', 'up')" ${index === 0 ? 'disabled' : ''} title="نقل لأعلى"><i class="fas fa-arrow-up"></i></button>
+          <button class="btn btn-outline" style="padding: 4px 8px; font-size: 11px;" onclick="app.moveLesson('${l.id}', 'down')" ${index === subLessons.length - 1 ? 'disabled' : ''} title="نقل لأسفل"><i class="fas fa-arrow-down"></i></button>
+          
+          <button class="btn btn-outline" style="padding: 6px 12px; font-size: 12px; border-color: var(--accent); color: var(--accent);" onclick="app.openEditLessonModal('${l.id}')">تعديل</button>
+          <button class="btn btn-outline" style="padding: 6px 12px; font-size: 12px; border-color: var(--danger); color: var(--danger);" onclick="app.deleteLesson('${l.id}')">حذف</button>
         </div>
       </div>
     `).join('');
-
-    examsTabHTML = `
-      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 25px; margin-bottom: 30px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
-          <div style="display: flex; align-items: center; gap: 10px; min-width: 250px;">
-            <label style="font-weight: 700; white-space: nowrap;">اختر المادة:</label>
-            <select class="form-input" style="padding: 8px; border-radius: 6px; border: 1px solid var(--border-color); width: 100%; background: var(--bg-primary); color: var(--text-primary);" onchange="app.selectedAdminCourseId = this.value; app.switchAdminTab('exams');">
-              ${courseOptions}
-            </select>
-          </div>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 30px; margin-top: 20px;">
-          <div>
-            <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 15px; border-bottom: 2px solid var(--primary-light); padding-bottom: 8px;">الأسئلة الحالية للامتحان التقييمي</h3>
-            ${questionsListHTML || '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">لا توجد أسئلة مضافة لهذه المادة بعد.</p>'}
-          </div>
-
-          <div style="background: var(--bg-primary); border: 1px solid var(--border-color); padding: 20px; border-radius: var(--radius-md);">
-            <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 15px;">إضافة سؤال جديد</h3>
-            <form onsubmit="event.preventDefault(); app.adminAddQuestion(this);">
-              <div class="form-group" style="margin-bottom: 12px;">
-                <label class="form-label" style="font-size: 13px;">نص السؤال</label>
-                <textarea name="question" class="form-input" rows="2" style="resize: none;" required placeholder="اكتب نص السؤال هنا..."></textarea>
-              </div>
-
-              <div class="form-group" style="margin-bottom: 12px;">
-                <label class="form-label" style="font-size: 13px;">نوع السؤال</label>
-                <select name="type" class="form-input" onchange="app.toggleQuestionFormType(this.value);" style="background: var(--bg-secondary); color: var(--text-primary);">
-                  <option value="mcq">اختيار من متعدد (MCQ)</option>
-                  <option value="tf">صواب / خطأ</option>
-                </select>
-              </div>
-
-              <div id="mcq-options-container" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 12px; background: var(--bg-secondary);">
-                <label class="form-label" style="font-size: 13px; font-weight: 700;">خيارات السؤال الاختياري</label>
-                <div class="form-group" style="margin-bottom: 8px;">
-                  <input type="text" name="opt1" class="form-input" placeholder="الخيار الأول (مثال: 2×2)" required>
-                </div>
-                <div class="form-group" style="margin-bottom: 8px;">
-                  <input type="text" name="opt2" class="form-input" placeholder="الخيار الثاني (مثال: 3×3)" required>
-                </div>
-                <div class="form-group" style="margin-bottom: 8px;">
-                  <input type="text" name="opt3" class="form-input" placeholder="الخيار الثالث">
-                </div>
-                <div class="form-group" style="margin-bottom: 8px;">
-                  <input type="text" name="opt4" class="form-input" placeholder="الخيار الرابع">
-                </div>
-              </div>
-
-              <div class="form-group" style="margin-bottom: 12px;">
-                <label class="form-label" style="font-size: 13px;">الإجابة الصحيحة</label>
-                <input type="text" name="answer" class="form-input" required placeholder="اكتب الإجابة الصحيحة تماماً كما كُتبت بالخيارات، أو 'صواب' / 'خطأ'">
-              </div>
-
-              <div class="form-group" style="margin-bottom: 12px;">
-                <label class="form-label" style="font-size: 13px;">طريقة الحل والتفسير</label>
-                <textarea name="explanation" class="form-input" rows="2" style="resize: none;" placeholder="اشرح للطالب طريقة الوصول للحل الصحيح..."></textarea>
-              </div>
-
-              <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">
-                <i class="fas fa-save"></i> حفظ السؤال في الامتحان
-              </button>
-            </form>
-          </div>
-        </div>
-      </div>
-    `;
   }
 
+  // واجهة الإعدادات الخاصة بـ Google Drive
+  const settingsHTML = `
+    <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 30px;">
+      <h3 style="font-size: 20px; font-weight: 800; margin-bottom: 15px;"><i class="fab fa-google-drive" style="color: #34a853;"></i> إعدادات الربط التلقائي بـ Google Drive API</h3>
+      <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.8; margin-bottom: 25px;">
+        لتتمكن من رفع ملفات الـ PDF مباشرة من جهازك وتخزينها تلقائياً على Google Drive، يرجى ملء البيانات التالية من مشروعك في Google Cloud Console. 
+        <br><strong style="color: var(--accent);">ملاحظة هامة:</strong> إذا بقيت هذه الحقول فارغة، سيقوم النظام تلقائياً بحفظ وتخزين الملفات محلياً في المتصفح، مما يتيح لك تجربة المنصة والرفع مباشرة بدون أي إعدادات!
+      </p>
+      
+      <form onsubmit="event.preventDefault(); app.saveSettings(this);">
+        <div class="form-group" style="margin-bottom: 15px;">
+          <label class="form-label">Client ID (معرّف العميل)</label>
+          <input type="text" name="clientId" class="form-input" value="${app.data.gdrive_settings.clientId || ''}" placeholder="أدخل Client ID الخاص بمشروع جوجل">
+        </div>
+        <div class="form-group" style="margin-bottom: 15px;">
+          <label class="form-label">API Key (مفتاح الواجهة البرمجية)</label>
+          <input type="text" name="apiKey" class="form-input" value="${app.data.gdrive_settings.apiKey || ''}" placeholder="أدخل API Key">
+        </div>
+        <div class="form-group" style="margin-bottom: 15px;">
+          <label class="form-label">ID المجلد الرئيسي لملوك المعادلة على Drive (اختياري)</label>
+          <input type="text" name="folderId" class="form-input" value="${app.data.gdrive_settings.folderId || ''}" placeholder="إذا كان لديك مجلد فارغ ترغب بالرفع داخله مباشرة">
+        </div>
+        
+        <div style="display: flex; gap: 15px; margin-top: 25px;">
+          <button type="submit" class="btn btn-primary">حفظ الإعدادات</button>
+          ${app.data.gdrive_settings.clientId ? `
+            <button type="button" class="btn btn-success" onclick="app.requestGoogleToken()" style="background-color: var(--success); color: white;">
+              <i class="fas fa-key"></i> الحصول على تصريح رفع (Google Login)
+            </button>
+          ` : ''}
+        </div>
+      </form>
+    </div>
+  `;
+
+  // واجهة اللوحة الرئيسية
   root.innerHTML = `
     <div class="container" style="padding: 40px 0;">
-      <h2 style="font-size: 28px; font-weight: 800; margin-bottom: 25px;">لوحة تحكم الإدارة والتحليلات العامة</h2>
-
-      <div class="admin-metrics-grid" style="margin-bottom: 30px;">
-        <div class="metric-card">
-          <div class="metric-info">
-            <h4>إجمالي الطلاب</h4>
-            <span>${activeStudents.length + 120}</span>
-          </div>
-          <div class="metric-icon"><i class="fas fa-users"></i></div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-info">
-            <h4>الكورسات المنشورة</h4>
-            <span>${app.data.courses.length}</span>
-          </div>
-          <div class="metric-icon" style="background-color: var(--primary-light); color: var(--primary);"><i class="fas fa-book"></i></div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-info">
-            <h4>أسئلة بنك الأسئلة</h4>
-            <span>${app.data.questionBank.length}</span>
-          </div>
-          <div class="metric-icon"><i class="fas fa-database"></i></div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-info">
-            <h4>معدل إتمام الدراسة</h4>
-            <span>87%</span>
-          </div>
-          <div class="metric-icon" style="background-color: rgba(16, 185, 129, 0.15); color: var(--success);"><i class="fas fa-check-double"></i></div>
-        </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+        <h2 style="font-size: 28px; font-weight: 800;"><i class="fas fa-user-shield"></i> لوحة التحكم وإدارة المحتوى</h2>
+        <span style="background: var(--success); color: white; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700;">
+          الأدمن متصل
+        </span>
       </div>
 
-      <!-- نظام التبويب الداخلي -->
-      <div class="tab-nav" style="margin-bottom: 25px; display: flex; border-bottom: 1px solid var(--border-color); gap: 20px;">
-        <button class="tab-btn ${app.activeAdminTab === 'students' ? 'active' : ''}" onclick="app.switchAdminTab('students')">إدارة الحسابات والطلاب</button>
-        <button class="tab-btn ${app.activeAdminTab === 'courses' ? 'active' : ''}" onclick="app.switchAdminTab('courses')">إدارة المواد والدروس</button>
-        <button class="tab-btn ${app.activeAdminTab === 'exams' ? 'active' : ''}" onclick="app.switchAdminTab('exams')">إدارة الامتحانات والأسئلة</button>
+      <!-- نظام التبويب -->
+      <div class="tab-nav" style="margin-bottom: 30px; display: flex; border-bottom: 1px solid var(--border-color); gap: 20px;">
+        <button class="tab-btn ${app.activeAdminTab === 'mahad' ? 'active' : ''}" onclick="app.switchAdminTab('mahad')">معادلة المعاهد</button>
+        <button class="tab-btn ${app.activeAdminTab === 'diploma' ? 'active' : ''}" onclick="app.switchAdminTab('diploma')">معادلة الدبلومات</button>
+        <button class="tab-btn ${app.activeAdminTab === 'settings' ? 'active' : ''}" onclick="app.switchAdminTab('settings')"><i class="fas fa-cog"></i> إعدادات Google Drive</button>
       </div>
 
-      <!-- محتوى تبويب إدارة الطلاب -->
-      <div id="admin-tab-students" style="display: ${app.activeAdminTab === 'students' ? 'block' : 'none'};">
-        <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 25px; margin-bottom: 30px;">
-          <h3 style="font-size: 20px; font-weight: 800; margin-bottom: 20px;">نظرة على إحصائيات التفاعل الأسبوعية</h3>
-          <div style="height: 150px; background-color: var(--bg-tertiary); border-radius: var(--radius-sm); display: flex; align-items: flex-end; justify-content: space-around; padding: 20px;">
-            <div style="width: 40px; height: 40%; background-color: var(--primary); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">السبت</div>
-            <div style="width: 40px; height: 60%; background-color: var(--primary); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">الأحد</div>
-            <div style="width: 40px; height: 85%; background-color: var(--primary); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">الإثنين</div>
-            <div style="width: 40px; height: 95%; background-color: var(--accent); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">اليوم</div>
+      <!-- المحتوى حسب التبويب النشط -->
+      ${app.activeAdminTab === 'settings' ? settingsHTML : `
+        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 25px; margin-bottom: 30px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px;">
+            <div style="display: flex; align-items: center; gap: 10px; min-width: 250px;">
+              <label style="font-weight: 800; white-space: nowrap; font-size: 15px;">المادة المستهدفة:</label>
+              <select class="form-input" style="padding: 8px; border-radius: 6px; border: 1px solid var(--border-color); width: 100%; background: var(--bg-primary); color: var(--text-primary);" onchange="app.selectedAdminSubjectId = this.value; router.handleRouting();">
+                ${subjectOptions.length ? subjectOptions : '<option value="">لا توجد مواد</option>'}
+              </select>
+            </div>
+            
+            ${selectedSub ? `
+              <button class="btn btn-primary" onclick="app.openAddLessonModal()"><i class="fas fa-plus"></i> إضافة درس جديد لـ ${selectedSub.name}</button>
+            ` : ''}
+          </div>
+
+          <div style="margin-top: 20px;">
+            <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 15px; border-bottom: 2px solid var(--primary-light); padding-bottom: 8px;">الدروس الحالية في المادة</h3>
+            ${lessonsListHTML || '<p style="color: var(--text-secondary); text-align: center; padding: 30px; background: var(--bg-primary); border-radius: 8px;">لا توجد دروس مضافة حالياً في هذه المادة.</p>'}
           </div>
         </div>
-
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-          <h3 style="font-size: 20px; font-weight: 800;">إدارة الحسابات والطلاب</h3>
-        </div>
-
-        <div class="admin-table-container">
-          <table class="admin-table">
-            <thead>
-              <tr>
-                <th>اسم الطالب</th>
-                <th>البريد الإلكتروني</th>
-                <th>الاشتراكات</th>
-                <th>إجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${studentRows.length ? studentRows : '<tr><td colspan="4" style="text-align: center;">لا يوجد طلاب مسجلين حالياً.</td></tr>'}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- محتوى تبويب إدارة الكورسات والدروس -->
-      <div id="admin-tab-courses" style="display: ${app.activeAdminTab === 'courses' ? 'block' : 'none'};">
-        ${coursesTabHTML}
-      </div>
-
-      <!-- محتوى تبويب إدارة الامتحانات والأسئلة -->
-      <div id="admin-tab-exams" style="display: ${app.activeAdminTab === 'exams' ? 'block' : 'none'};">
-        ${examsTabHTML}
-      </div>
-
+      `}
     </div>
-  `;
-});
 
-// 8. تسجيل الدخول
-router.addRoute('login', () => {
-  const root = document.getElementById('app');
-  
-  // التحقق من خيار الدخول السريع
-  const showDemo = new URLSearchParams(window.location.search).get('demo') === 'true' || app.showDemoActive;
+    <!-- مودال إضافة/تعديل درس -->
+    <div id="lesson-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); align-items: center; justify-content: center; z-index: 9999; padding: 20px;">
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); width: 100%; max-width: 600px; border-radius: var(--radius-md); padding: 30px; position: relative; max-height: 90vh; overflow-y: auto;">
+        <button onclick="app.closeLessonModal()" style="position: absolute; left: 20px; top: 20px; border: 0; background: transparent; font-size: 20px; cursor: pointer; color: var(--text-secondary);">&times;</button>
+        <h3 id="modal-title" style="font-size: 20px; font-weight: 800; margin-bottom: 20px; text-align: right; color: var(--text-primary);">إضافة درس جديد</h3>
+        
+        <form id="lesson-form" onsubmit="event.preventDefault(); app.saveLesson(this);">
+          <input type="hidden" name="lesson_id" value="">
+          
+          <div class="form-group" style="margin-bottom: 15px; text-align: right;">
+            <label class="form-label">عنوان الدرس</label>
+            <input type="text" name="title" class="form-input" required placeholder="مثال: الدرس الأول: المحددات والعمليات عليها" style="width: 100%;">
+          </div>
 
-  root.innerHTML = `
-    <div class="auth-container">
-      <div class="auth-header">
-        <h2 id="login-title" style="font-size: 24px; font-weight: 800; cursor: pointer;" onclick="app.handleTitleClick()">تسجيل الدخول</h2>
-        <p style="font-size: 13px; color: var(--text-secondary); margin-top: 8px;">مرحباً بك مجدداً في ملوك المعادلة</p>
-      </div>
-      <form onsubmit="event.preventDefault(); app.login(this.email.value, this.password.value);">
-        <div class="form-group">
-          <label class="form-label">البريد الإلكتروني</label>
-          <input type="email" name="email" class="form-input" placeholder="name@example.com" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">كلمة المرور</label>
-          <input type="password" name="password" class="form-input" placeholder="••••••••" required>
-        </div>
-        <div class="form-group" style="display: flex; justify-content: space-between; align-items: center;">
-          <label class="form-checkbox">
-            <input type="checkbox"> تذكرني
-          </label>
-          <a onclick="router.navigateTo('forgot-password')" style="font-size: 13px; color: var(--primary); cursor: pointer;">نسيت كلمة المرور؟</a>
-        </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">دخول</button>
-      </form>
-      <p style="text-align: center; font-size: 13px; color: var(--text-secondary); margin-top: 25px;">
-        ليس لديك حساب؟ <a onclick="router.navigateTo('register')" style="color: var(--primary); font-weight: 700; cursor: pointer;">إنشاء حساب جديد</a>
-      </p>
-      <div id="demo-login-box" style="margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 15px; text-align: center; display: ${showDemo ? 'block' : 'none'};">
-        <p style="font-size: 12px; color: var(--text-tertiary); margin-bottom: 10px;">أو سجل دخول سريعاً بـ:</p>
-        <button class="btn btn-outline" style="width: 100%; font-size: 13px; margin-bottom: 8px;" onclick="document.querySelector('input[name=email]').value='student@molok.com'; document.querySelector('input[name=password]').value='123456';">طالب تجريبي</button>
-        <button class="btn btn-outline" style="width: 100%; font-size: 13px;" onclick="document.querySelector('input[name=email]').value='admin@molok.com'; document.querySelector('input[name=password]').value='admin123';">مسؤول الإدارة</button>
+          <div class="form-group" style="margin-bottom: 15px; text-align: right;">
+            <label class="form-label">رابط فيديو يوتيوب</label>
+            <input type="text" name="youtube_url" class="form-input" required placeholder="https://www.youtube.com/watch?v=..." style="width: 100%;">
+          </div>
+
+          <div class="form-group" style="margin-bottom: 15px; text-align: right;">
+            <label class="form-label">وصف الدرس / ملاحظات (اختياري)</label>
+            <textarea name="description" class="form-input" rows="3" style="width: 100%; resize: none;" placeholder="اكتب نبذة مختصرة عن الدرس..."></textarea>
+          </div>
+
+          <!-- نظام ملفات PDF -->
+          <div style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 15px; margin-bottom: 20px; background: var(--bg-primary); text-align: right;">
+            <label class="form-label" style="font-weight: 800; margin-bottom: 10px; display: block;">ملف الـ PDF المرفق</label>
+            
+            <div style="display: flex; gap: 20px; margin-bottom: 12px; font-size: 13px;">
+              <label style="cursor: pointer;">
+                <input type="radio" name="pdf_source" value="file" checked onchange="app.togglePdfSourceInput('file')"> اختيار ملف من الجهاز (أوتوماتيكي)
+              </label>
+              <label style="cursor: pointer;">
+                <input type="radio" name="pdf_source" value="url" onchange="app.togglePdfSourceInput('url')"> إدخال رابط مباشر/Drive جاهز
+              </label>
+            </div>
+
+            <!-- حقل اختيار ملف -->
+            <div id="pdf-file-field" style="display: block;">
+              <input type="file" name="pdf_file" accept="application/pdf" class="form-input" style="width: 100%; padding: 6px;">
+              <span style="font-size: 11px; color: var(--text-tertiary); display: block; margin-top: 5px;">
+                سيتم رفع الملف تلقائياً إلى مجلد المادة على Google Drive أو حفظه محلياً كاحتياطي.
+              </span>
+            </div>
+
+            <!-- حقل الرابط المباشر -->
+            <div id="pdf-url-field" style="display: none;">
+              <input type="text" name="pdf_url" class="form-input" placeholder="https://drive.google.com/..." style="width: 100%;">
+            </div>
+          </div>
+
+          <div id="modal-upload-status" style="display: none; text-align: center; margin-bottom: 15px; font-weight: 700; color: var(--accent); font-size: 13px;">
+            <i class="fas fa-spinner fa-spin"></i> جاري حفظ الدرس وتخزين الملف...
+          </div>
+
+          <div style="display: flex; gap: 12px;">
+            <button type="submit" class="btn btn-primary" id="modal-save-btn" style="flex-grow: 1; padding: 12px;">حفظ الدرس</button>
+            <button type="button" class="btn btn-outline" onclick="app.closeLessonModal()" style="padding: 12px;">إلغاء</button>
+          </div>
+        </form>
       </div>
     </div>
   `;
 });
 
-// دوال تفعيل الدخول السريع الخفي
-app.loginClickCount = 0;
-app.handleTitleClick = function() {
-  app.loginClickCount++;
-  if (app.loginClickCount >= 5) {
-    app.showDemoActive = true;
-    const box = document.getElementById('demo-login-box');
-    if (box) {
-      box.style.display = 'block';
-      alert('تم إظهار أزرار الدخول التجريبي السري بنجاح.');
-    }
-  }
-};
-
-// دوال لوحة الإدارة التفاعلية
-app.switchAdminTab = function(tabName) {
-  app.activeAdminTab = tabName;
+// ==========================================
+// وظائف الأدمن ولوحة التحكم (Admin Functions)
+// ==========================================
+app.switchAdminTab = function(tab) {
+  app.activeAdminTab = tab;
   router.handleRouting();
 };
 
-app.toggleQuestionFormType = function(type) {
-  const container = document.getElementById('mcq-options-container');
-  if (container) {
-    if (type === 'mcq') {
-      container.style.display = 'block';
-      container.querySelectorAll('input').forEach(i => i.setAttribute('required', 'true'));
-    } else {
-      container.style.display = 'none';
-      container.querySelectorAll('input').forEach(i => i.removeAttribute('required'));
-    }
+app.saveSettings = function(form) {
+  app.data.gdrive_settings.clientId = form.clientId.value.trim();
+  app.data.gdrive_settings.apiKey = form.apiKey.value.trim();
+  app.data.gdrive_settings.folderId = form.folderId.value.trim();
+  app.save();
+  alert('تم حفظ الإعدادات بنجاح!');
+  app.initGoogleClient();
+  router.handleRouting();
+};
+
+// التبديل بين الرفع والروابط
+app.togglePdfSourceInput = function(source) {
+  const fileField = document.getElementById('pdf-file-field');
+  const urlField = document.getElementById('pdf-url-field');
+  if (source === 'file') {
+    fileField.style.display = 'block';
+    urlField.style.display = 'none';
+  } else {
+    fileField.style.display = 'none';
+    urlField.style.display = 'block';
   }
 };
 
-app.adminAddLesson = function(form) {
-  const title = form.title.value;
-  const duration = form.duration.value;
-  const homework = form.homework.value || '';
-  const notes = form.notes.value || '';
-  const videoSource = form.video_source.value;
+// فتح مودال الإضافة
+app.openAddLessonModal = function() {
+  const modal = document.getElementById('lesson-modal');
+  const form = document.getElementById('lesson-form');
+  document.getElementById('modal-title').innerText = 'إضافة درس جديد لمادة ' + app.data.subjects.find(s => s.id === app.selectedAdminSubjectId).name;
+  form.reset();
+  form.lesson_id.value = '';
+  app.togglePdfSourceInput('file');
+  modal.style.display = 'flex';
+};
+
+// فتح مودال التعديل
+app.openEditLessonModal = function(lessonId) {
+  const lesson = app.data.lessons.find(l => l.id === lessonId);
+  if (!lesson) return;
+
+  const modal = document.getElementById('lesson-modal');
+  const form = document.getElementById('lesson-form');
+  document.getElementById('modal-title').innerText = 'تعديل الدرس الحالي';
+  
+  form.lesson_id.value = lesson.id;
+  form.title.value = lesson.title;
+  form.youtube_url.value = lesson.youtube_url;
+  form.description.value = lesson.description || '';
+  
+  if (lesson.pdf_drive_url) {
+    app.togglePdfSourceInput('url');
+    form.pdf_source[1].checked = true;
+    form.pdf_url.value = lesson.pdf_drive_url;
+  } else {
+    app.togglePdfSourceInput('file');
+    form.pdf_source[0].checked = true;
+  }
+  
+  modal.style.display = 'flex';
+};
+
+app.closeLessonModal = function() {
+  document.getElementById('lesson-modal').style.display = 'none';
+};
+
+// حفظ الدرس (إضافة أو تعديل)
+app.saveLesson = async function(form) {
+  const lessonId = form.lesson_id.value;
+  const title = form.title.value.trim();
+  const youtubeUrl = form.youtube_url.value.trim();
+  const description = form.description.value.trim();
   const pdfSource = form.pdf_source.value;
   
-  const submitBtn = document.getElementById('lesson-submit-btn');
-  const uploadStatus = document.getElementById('upload-status');
+  const saveBtn = document.getElementById('modal-save-btn');
+  const statusDiv = document.getElementById('modal-upload-status');
   
-  if (submitBtn) submitBtn.disabled = true;
-  if (uploadStatus) uploadStatus.style.display = 'block';
+  saveBtn.disabled = true;
+  statusDiv.style.display = 'block';
 
-  let videoPromise = Promise.resolve('');
-  let pdfPromise = Promise.resolve('');
+  let pdfUrl = '';
 
-  if (videoSource === 'file') {
-    const file = form.video_file.files[0];
-    if (file) {
-      videoPromise = window.mediaStore.saveMedia(file);
+  try {
+    if (pdfSource === 'url') {
+      pdfUrl = form.pdf_url.value.trim();
     } else {
-      alert('الرجاء اختيار ملف فيديو للرفع.');
-      if (submitBtn) submitBtn.disabled = false;
-      if (uploadStatus) uploadStatus.style.display = 'none';
-      return;
+      const file = form.pdf_file.files[0];
+      if (file) {
+        // الرفع الأوتوماتيكي
+        pdfUrl = await app.uploadPdfFile(file);
+      } else if (lessonId) {
+        // المحافظة على الملف القديم عند التعديل
+        const oldLesson = app.data.lessons.find(l => l.id === lessonId);
+        pdfUrl = oldLesson ? oldLesson.pdf_drive_url : '';
+      }
     }
-  } else {
-    videoPromise = Promise.resolve(form.video_url.value);
-  }
 
-  if (pdfSource === 'file') {
-    const file = form.pdf_file.files[0];
-    if (file) {
-      pdfPromise = window.mediaStore.saveMedia(file);
+    if (lessonId) {
+      // تعديل
+      const lesson = app.data.lessons.find(l => l.id === lessonId);
+      if (lesson) {
+        lesson.title = title;
+        lesson.youtube_url = youtubeUrl;
+        lesson.description = description;
+        lesson.pdf_drive_url = pdfUrl;
+      }
     } else {
-      alert('الرجاء اختيار ملف PDF للرفع.');
-      if (submitBtn) submitBtn.disabled = false;
-      if (uploadStatus) uploadStatus.style.display = 'none';
-      return;
-    }
-  } else {
-    pdfPromise = Promise.resolve(form.pdf_url.value);
-  }
-
-  Promise.all([videoPromise, pdfPromise]).then(([videoUrl, pdfUrl]) => {
-    const selectedCourse = app.data.courses.find(c => c.id === app.selectedAdminCourseId);
-    if (selectedCourse) {
-      if (!selectedCourse.lessons) selectedCourse.lessons = [];
+      // إضافة جديد
+      const subLessons = app.data.lessons.filter(l => l.subject_id === app.selectedAdminSubjectId);
+      const nextOrder = subLessons.length > 0 ? Math.max(...subLessons.map(l => l.order || 0)) + 1 : 1;
+      
       const newLesson = {
         id: 'lesson_' + Date.now(),
+        subject_id: app.selectedAdminSubjectId,
         title,
-        duration,
-        videoUrl,
-        pdfUrl,
-        homework,
-        notes
+        description,
+        youtube_url: youtubeUrl,
+        pdf_drive_url: pdfUrl,
+        order: nextOrder,
+        created_at: Date.now()
       };
-      selectedCourse.lessons.push(newLesson);
-      selectedCourse.stats.lessonsCount = selectedCourse.lessons.length;
-      app.save();
-      alert('تمت إضافة الدرس بنجاح!');
-      router.handleRouting();
+      app.data.lessons.push(newLesson);
     }
-  }).catch(err => {
+
+    app.save();
+    alert('تم حفظ الدرس بنجاح!');
+    app.closeLessonModal();
+    router.handleRouting();
+
+  } catch (err) {
     console.error(err);
-    alert('حدث خطأ أثناء حفظ الملفات: ' + err.message);
-  }).finally(() => {
-    if (submitBtn) submitBtn.disabled = false;
-    if (uploadStatus) uploadStatus.style.display = 'none';
-  });
+    alert('حدث خطأ أثناء حفظ الملف: ' + err.message);
+  } finally {
+    saveBtn.disabled = false;
+    statusDiv.style.display = 'none';
+  }
 };
 
-app.adminDeleteLesson = function(courseId, lessonId) {
-  if (confirm('هل أنت متأكد من حذف هذا الدرس؟')) {
-    const course = app.data.courses.find(c => c.id === courseId);
-    if (course) {
-      const lesson = course.lessons.find(l => l.id === lessonId);
-      if (lesson) {
-        if (lesson.videoUrl && lesson.videoUrl.startsWith('local_file_')) {
-          window.mediaStore.deleteMedia(lesson.videoUrl).catch(e => console.error(e));
-        }
-        if (lesson.pdfUrl && lesson.pdfUrl.startsWith('local_file_')) {
-          window.mediaStore.deleteMedia(lesson.pdfUrl).catch(e => console.error(e));
-        }
+// وظيفة الرفع التي تختار بين Google Drive و التخزين المحلي الاحتياطي
+app.uploadPdfFile = async function(file) {
+  const settings = app.data.gdrive_settings;
+  const subject = app.data.subjects.find(s => s.id === app.selectedAdminSubjectId);
+  const categoryName = subject.category === 'mahad' ? 'معادلة المعاهد' : 'معادلة الدبلومات';
+  const subjectName = subject.name;
+
+  // في حال توفر Google Drive credentials والـ token
+  if (settings.clientId && settings.token && typeof gapi !== 'undefined' && gapi.client && gapi.client.drive) {
+    try {
+      console.log('Starting Google Drive Upload process...');
+      
+      // 1. إيجاد أو إنشاء المجلد الرئيسي "ملوك المعادلة"
+      let rootFolderId = settings.folderId;
+      if (!rootFolderId) {
+        rootFolderId = await app.getOrCreateDriveFolder('ملوك المعادلة', null);
       }
-      course.lessons = course.lessons.filter(l => l.id !== lessonId);
-      course.stats.lessonsCount = course.lessons.length;
-      app.save();
-      alert('تم حذف الدرس بنجاح.');
-      router.handleRouting();
+
+      // 2. إيجاد أو إنشاء مجلد الفئة (معادلة المعاهد / الدبلومات)
+      const categoryFolderId = await app.getOrCreateDriveFolder(categoryName, rootFolderId);
+
+      // 3. إيجاد أو إنشاء مجلد المادة (مثل المحاسبة)
+      const subjectFolderId = await app.getOrCreateDriveFolder(subjectName, categoryFolderId);
+
+      // 4. رفع الملف الفعلي إلى مجلد المادة
+      const fileId = await app.uploadFileToDriveFolder(file, subjectFolderId);
+
+      // 5. جعل الملف عاماً للقراءة (Public sharing)
+      await app.makeDriveFilePublic(fileId);
+
+      // 6. جلب رابط الملف المباشر للمشاهدة والتنزيل
+      const fileMetadata = await gapi.client.drive.files.get({
+        fileId: fileId,
+        fields: 'webViewLink, webContentLink'
+      });
+
+      return fileMetadata.result.webViewLink || fileMetadata.result.webContentLink;
+
+    } catch (e) {
+      console.error('Failed to upload to Google Drive: ', e);
+      throw new Error('فشل الرفع لـ Google Drive: ' + e.message);
     }
+  } else {
+    // حل محلي احتياطي: استخدام IndexedDB المحلي
+    console.log('No Google Drive credentials configured. Falling back to local IndexedDB store.');
+    const localId = await window.mediaStore.saveMedia(file);
+    return window.mediaStore.getMediaUrl(localId);
   }
 };
 
-app.adminAddQuestion = function(form) {
-  const question = form.question.value;
-  const type = form.type.value;
-  const answer = form.answer.value;
-  const explanation = form.explanation.value || '';
-  
-  let options = null;
-  if (type === 'mcq') {
-    options = [form.opt1.value, form.opt2.value];
-    if (form.opt3.value) options.push(form.opt3.value);
-    if (form.opt4.value) options.push(form.opt4.value);
-  } else {
-    options = ['صواب', 'خطأ'];
+// دوال مساعدة لـ Google Drive API
+app.getOrCreateDriveFolder = async function(folderName, parentId) {
+  let query = `mimeType = 'application/vnd.google-apps.folder' and name = '${folderName}' and trashed = false`;
+  if (parentId) {
+    query += ` and '${parentId}' in parents`;
   }
+  
+  const response = await gapi.client.drive.files.list({
+    q: query,
+    spaces: 'drive',
+    fields: 'files(id, name)'
+  });
 
-  const newQ = {
-    id: 'q_' + Date.now(),
-    courseId: app.selectedAdminCourseId,
-    type,
-    question,
-    options,
-    answer,
-    explanation,
-    difficulty: 'medium'
+  const files = response.result.files;
+  if (files && files.length > 0) {
+    return files[0].id;
+  } else {
+    // إنشاء مجلد جديد
+    const fileMetadata = {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder'
+    };
+    if (parentId) {
+      fileMetadata.parents = [parentId];
+    }
+
+    const folder = await gapi.client.drive.files.create({
+      resource: fileMetadata,
+      fields: 'id'
+    });
+    return folder.result.id;
+  }
+};
+
+app.uploadFileToDriveFolder = async function(file, parentFolderId) {
+  const metadata = {
+    name: file.name,
+    parents: [parentFolderId]
   };
 
-  app.data.questionBank.push(newQ);
-  app.save();
-  alert('تمت إضافة السؤال بنجاح إلى بنك الأسئلة!');
-  router.handleRouting();
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  form.append('file', file);
+
+  const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+    method: 'POST',
+    headers: new Headers({ 'Authorization': 'Bearer ' + app.data.gdrive_settings.token }),
+    body: form
+  });
+
+  if (!response.ok) {
+    throw new Error('API Request failure: ' + response.statusText);
+  }
+
+  const result = await response.json();
+  return result.id;
 };
 
-app.adminDeleteQuestion = function(qId) {
-  if (confirm('هل أنت متأكد من حذف هذا السؤال؟')) {
-    app.data.questionBank = app.data.questionBank.filter(q => q.id !== qId);
+app.makeDriveFilePublic = async function(fileId) {
+  // استخدام fetch لإنشاء صلاحيات الوصول
+  const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
+    method: 'POST',
+    headers: new Headers({
+      'Authorization': 'Bearer ' + app.data.gdrive_settings.token,
+      'Content-Type': 'application/json'
+    }),
+    body: JSON.stringify({
+      role: 'reader',
+      type: 'anyone'
+    })
+  });
+
+  if (!response.ok) {
+    console.warn('Failed to set permissions: ', response.statusText);
+  }
+};
+
+// حذف درس
+app.deleteLesson = function(lessonId) {
+  if (confirm('هل أنت متأكد من رغبتك في حذف هذا الدرس نهائياً؟')) {
+    app.data.lessons = app.data.lessons.filter(l => l.id !== lessonId);
     app.save();
-    alert('تم حذف السؤال بنجاح.');
+    alert('تم حذف الدرس بنجاح.');
     router.handleRouting();
   }
 };
 
-// 9. إنشاء حساب جديد
-router.addRoute('register', () => {
-  const root = document.getElementById('app');
-  root.innerHTML = `
-    <div class="auth-container">
-      <div class="auth-header">
-        <h2 style="font-size: 24px; font-weight: 800;">إنشاء حساب جديد</h2>
-        <p style="font-size: 13px; color: var(--text-secondary); margin-top: 8px;">ابدأ رحلة التفوق واجتياز المعادلة معنا</p>
-      </div>
-      <form onsubmit="event.preventDefault(); if(this.password.value !== this.confirm.value) { alert('كلمتا المرور غير متطابقتين.'); return; } app.register(this.name.value, this.email.value, this.password.value);">
-        <div class="form-group">
-          <label class="form-label">الاسم الكامل</label>
-          <input type="text" name="name" class="form-input" placeholder="اكتب اسمك ثلاثياً" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">البريد الإلكتروني</label>
-          <input type="email" name="email" class="form-input" placeholder="name@example.com" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">كلمة المرور</label>
-          <input type="password" name="password" class="form-input" placeholder="••••••••" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">تأكيد كلمة المرور</label>
-          <input type="password" name="confirm" class="form-input" placeholder="••••••••" required>
-        </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">إنشاء حساب</button>
-      </form>
-      <p style="text-align: center; font-size: 13px; color: var(--text-secondary); margin-top: 25px;">
-        لديك حساب بالفعل؟ <a onclick="router.navigateTo('login')" style="color: var(--primary); font-weight: 700; cursor: pointer;">سجل الدخول</a>
-      </p>
-    </div>
-  `;
-});
+// ترتيب الدروس
+app.moveLesson = function(lessonId, direction) {
+  const subjectId = app.selectedAdminSubjectId;
+  const subLessons = app.data.lessons
+    .filter(l => l.subject_id === subjectId)
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
 
-// 10. استعادة كلمة المرور
-router.addRoute('forgot-password', () => {
-  const root = document.getElementById('app');
-  if (!app.forgotPasswordStep) app.forgotPasswordStep = 'email';
+  const index = subLessons.findIndex(l => l.id === lessonId);
+  if (index === -1) return;
 
-  if (app.forgotPasswordStep === 'email') {
-    root.innerHTML = `
-      <div class="auth-container">
-        <div class="auth-header">
-          <h2 style="font-size: 24px; font-weight: 800;">استعادة كلمة المرور</h2>
-          <p style="font-size: 13px; color: var(--text-secondary); margin-top: 8px;">أدخل بريدك الإلكتروني للتحقق وإعادة تعيين كلمة المرور</p>
-        </div>
-        <form onsubmit="event.preventDefault(); app.submitForgotPasswordEmail(this.email.value);">
-          <div class="form-group">
-            <label class="form-label">البريد الإلكتروني</label>
-            <input type="email" name="email" class="form-input" placeholder="name@example.com" required>
-          </div>
-          <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">التحقق من البريد</button>
-        </form>
-        <p style="text-align: center; font-size: 13px; color: var(--text-secondary); margin-top: 25px;">
-          <a onclick="app.forgotPasswordStep='email'; router.navigateTo('login')" style="color: var(--primary); font-weight: 700; cursor: pointer;">العودة لتسجيل الدخول</a>
-        </p>
-      </div>
-    `;
-  } else if (app.forgotPasswordStep === 'reset') {
-    root.innerHTML = `
-      <div class="auth-container">
-        <div class="auth-header">
-          <h2 style="font-size: 24px; font-weight: 800;">تعيين كلمة المرور</h2>
-          <p style="font-size: 13px; color: var(--text-secondary); margin-top: 8px;">أدخل كلمة المرور الجديدة للحساب (${app.forgotPasswordEmail})</p>
-        </div>
-        <form onsubmit="event.preventDefault(); app.submitNewPassword(this.password.value, this.confirm.value);">
-          <div class="form-group">
-            <label class="form-label">كلمة المرور الجديدة</label>
-            <input type="password" name="password" class="form-input" placeholder="••••••••" required>
-          </div>
-          <div class="form-group">
-            <label class="form-label">تأكيد كلمة المرور</label>
-            <input type="password" name="confirm" class="form-input" placeholder="••••••••" required>
-          </div>
-          <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">حفظ وتعيين</button>
-        </form>
-        <p style="text-align: center; font-size: 13px; color: var(--text-secondary); margin-top: 25px;">
-          <a onclick="app.forgotPasswordStep='email'; app.forgotPasswordEmail=''; router.navigateTo('login')" style="color: var(--primary); font-weight: 700; cursor: pointer;">إلغاء والعودة</a>
-        </p>
-      </div>
-    `;
-  }
-});
-
-app.submitForgotPasswordEmail = function(email) {
-  const isDemoStudent = email === 'student@molok.com';
-  const isAdmin = email === 'admin@molok.com';
-  const foundUser = app.data.users?.find(u => u.email === email);
-
-  if (!isDemoStudent && !isAdmin && !foundUser) {
-    alert("عذراً، هذا البريد الإلكتروني غير مسجل لدينا في قاعدة البيانات.");
-    return;
+  if (direction === 'up' && index > 0) {
+    // التبديل مع السابق
+    const temp = subLessons[index].order;
+    subLessons[index].order = subLessons[index - 1].order;
+    subLessons[index - 1].order = temp;
+  } else if (direction === 'down' && index < subLessons.length - 1) {
+    // التبديل مع التالي
+    const temp = subLessons[index].order;
+    subLessons[index].order = subLessons[index + 1].order;
+    subLessons[index + 1].order = temp;
   }
 
-  app.forgotPasswordEmail = email;
-  app.forgotPasswordStep = 'reset';
+  app.save();
   router.handleRouting();
 };
 
-app.submitNewPassword = function(newPassword, confirmPassword) {
-  if (newPassword !== confirmPassword) {
-    alert("كلمتا المرور غير متطابقتين.");
-    return;
-  }
-
-  const email = app.forgotPasswordEmail;
-  if (email === 'student@molok.com') {
-    alert("تنبيه: تم محاكاة التعيين بنجاح للحساب التجريبي (كلمة المرور الافتراضية تبقى 123456).");
-  } else if (email === 'admin@molok.com') {
-    alert("تنبيه: تم محاكاة التعيين بنجاح لحساب المسؤول العام (كلمة المرور الافتراضية تبقى admin123).");
-  } else {
-    const user = app.data.users?.find(u => u.email === email);
-    if (user) {
-      user.password = newPassword;
-      app.save();
-    }
-  }
-
-  alert("تم إعادة تعيين كلمة المرور بنجاح! يمكنك الآن تسجيل الدخول بها.");
-  app.forgotPasswordStep = 'email';
-  app.forgotPasswordEmail = '';
-  router.navigateTo('login');
-};
-
-// 11. صفحات سياسة الخصوصية والشروط والأحكام و اتصل بنا
-router.addRoute('privacy', () => {
-  const root = document.getElementById('app');
-  root.innerHTML = `
-    <div class="container" style="padding: 60px 0; max-width: 800px;">
-      <h1 style="font-size: 32px; font-weight: 800; margin-bottom: 25px;">سياسة الخصوصية</h1>
-      <p style="line-height: 1.8; color: var(--text-secondary);">نحن في ملوك المعادلة نلتزم بحفظ خصوصيتك التامة وسلامة بياناتك الشخصية والدراسية، ولا نقوم بمشاركتها مع أي جهة خارجية أو أطراف ثالثة دون إذنك المسبق.</p>
-    </div>
-  `;
-});
-
-router.addRoute('terms', () => {
-  const root = document.getElementById('app');
-  root.innerHTML = `
-    <div class="container" style="padding: 60px 0; max-width: 800px;">
-      <h1 style="font-size: 32px; font-weight: 800; margin-bottom: 25px;">الشروط والأحكام</h1>
-      <p style="line-height: 1.8; color: var(--text-secondary);">جميع الحقوق والمواد المعروضة على منصة ملوك المعادلة هي ملكية فكرية محمية، ولا يسمح بإعادة تسجيلها أو بثها خارج إطار المنصة دون موافقة الإدارة العامة.</p>
-    </div>
-  `;
-});
-
+// ==========================================
+// مسارات الصفحات الفرعية والاتصال
+// ==========================================
 router.addRoute('contact', () => {
   const root = document.getElementById('app');
   root.innerHTML = `
     <div class="container" style="padding: 60px 0; max-width: 600px;">
-      <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 40px;">
-        <h2 style="font-size: 28px; font-weight: 800; margin-bottom: 20px; text-align: center;">اتصل بنا</h2>
+      <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 40px; box-shadow: var(--card-shadow);">
+        <h2 style="font-size: 28px; font-weight: 800; margin-bottom: 20px; text-align: center;">تواصل معنا</h2>
+        <p style="text-align: center; color: var(--text-secondary); margin-bottom: 25px; font-size: 14px;">يسعدنا دائماً استقبال استفساراتكم واقتراحاتكم لتطوير المنصة.</p>
         <form onsubmit="event.preventDefault(); alert('تم إرسال رسالتك بنجاح! وسنتواصل معك قريباً.'); this.reset();">
-          <div class="form-group">
+          <div class="form-group" style="margin-bottom: 15px;">
             <label class="form-label">الاسم الكامل</label>
-            <input type="text" class="form-input" required>
+            <input type="text" class="form-input" required style="width: 100%;">
           </div>
-          <div class="form-group">
+          <div class="form-group" style="margin-bottom: 15px;">
             <label class="form-label">البريد الإلكتروني</label>
-            <input type="email" class="form-input" required>
+            <input type="email" class="form-input" required style="width: 100%;">
           </div>
-          <div class="form-group">
-            <label class="form-label">الرسالة</label>
-            <textarea class="form-input" rows="5" style="resize: none;" required></textarea>
+          <div class="form-group" style="margin-bottom: 20px;">
+            <label class="form-label">رسالتك</label>
+            <textarea class="form-input" rows="5" style="resize: none; width: 100%;" required placeholder="اكتب استفسارك هنا..."></textarea>
           </div>
-          <button type="submit" class="btn btn-primary" style="width: 100%;">إرسال الرسالة</button>
+          <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px;">إرسال الرسالة</button>
         </form>
         
         <div style="margin-top: 25px; text-align: center; border-top: 1px solid var(--border-color); padding-top: 20px;">
@@ -1388,430 +983,30 @@ router.addRoute('contact', () => {
   `;
 });
 
-// دوال التحكم بالدروس والفيديو والتفاعل الدراسي
-app.enrollInCourse = function(courseId) {
-  if (!app.currentUser) {
-    alert("يرجى تسجيل الدخول أولاً لتتمكن من الاشتراك في الكورس.");
-    router.navigateTo('login');
-    return;
-  }
-  if (!app.currentUser.progress) app.currentUser.progress = {};
-  if (!app.currentUser.progress[courseId]) {
-    app.currentUser.progress[courseId] = {
-      completedLessons: [],
-      lastPositions: {},
-      examScore: null
-    };
-    app.save();
-    alert("تم الاشتراك في الكورس بنجاح! تمتع بدراسة منهجك الآن.");
-    router.navigateTo(`lesson-player?courseId=${courseId}`);
-  }
-};
-
-app.saveVideoPosition = function(courseId, lessonId, position) {
-  if (app.currentUser && app.currentUser.progress[courseId]) {
-    if (!app.currentUser.progress[courseId].lastPositions) {
-      app.currentUser.progress[courseId].lastPositions = {};
-    }
-    app.currentUser.progress[courseId].lastPositions[lessonId] = position;
-    app.save();
-  }
-};
-
-app.markLessonComplete = function(courseId, lessonId) {
-  if (app.currentUser && app.currentUser.progress[courseId]) {
-    const completed = app.currentUser.progress[courseId].completedLessons;
-    if (!completed.includes(lessonId)) {
-      completed.push(lessonId);
-      app.save();
-      
-      // تحديث مظهر قائمة التشغيل مباشرة وتحديد الزر
-      alert("تم إكمال الدرس!");
-      
-      const course = app.data.courses.find(c => c.id === courseId);
-      const nextIdx = course.lessons.findIndex(l => l.id === lessonId) + 1;
-      if (nextIdx < course.lessons.length) {
-        router.navigateTo(`lesson-player?courseId=${courseId}&lessonId=${course.lessons[nextIdx].id}`);
-      } else {
-        alert("تهانينا! لقد أتممت جميع الدروس بنجاح. يمكنك الآن تقديم الاختبار النهائي.");
-        router.navigateTo(`exam?courseId=${courseId}`);
-      }
-    }
-  }
-};
-
-app.handleVideoEnded = function(courseId, lessonId) {
-  app.markLessonComplete(courseId, lessonId);
-};
-
-app.switchTab = function(tabName) {
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.classList.remove('active');
-  });
-  document.querySelectorAll('.tab-panel').forEach(panel => {
-    panel.style.display = 'none';
-  });
-  event.target.classList.add('active');
-  document.getElementById(`tab-content-${tabName}`).style.display = 'block';
-};
-
-app.toggleWishlist = function(courseId, event) {
-  event.stopPropagation();
-  if (app.wishlist.includes(courseId)) {
-    app.wishlist = app.wishlist.filter(id => id !== courseId);
-    event.target.className = "far fa-heart";
-  } else {
-    app.wishlist.push(courseId);
-    event.target.className = "fas fa-heart";
-  }
-  app.save();
-};
-
-// دوال نظام الاختبار والتقييم
-app.startExamTimer = function() {
-  if (app.quizState.timerInterval) clearInterval(app.quizState.timerInterval);
-  app.quizState.timerInterval = setInterval(() => {
-    app.quizState.timeRemaining--;
-    const timerText = document.getElementById('quiz-timer-text');
-    if (timerText) {
-      const minutes = Math.floor(app.quizState.timeRemaining / 60);
-      const seconds = app.quizState.timeRemaining % 60;
-      timerText.textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-    }
-    if (app.quizState.timeRemaining <= 0) {
-      clearInterval(app.quizState.timerInterval);
-      alert("انتهى وقت الاختبار!");
-      app.submitExam();
-    }
-  }, 1000);
-};
-
-app.renderQuizQuestion = function() {
-  const root = document.getElementById('app');
-  const q = app.quizState.questions[app.quizState.currentIdx];
-  const total = app.quizState.questions.length;
-  
-  const optionsHTML = q.options.map(option => {
-    const isSelected = app.quizState.answers[q.id] === option;
-    return `
-      <div class="option-item ${isSelected ? 'selected' : ''}" onclick="app.selectQuizOption('${q.id}', '${option}')">
-        <span>${option}</span>
-      </div>
-    `;
-  }).join('');
-
-  root.innerHTML = `
-    <div class="container" style="padding: 40px 0;">
-      <div class="quiz-card">
-        <div class="quiz-header">
-          <div>
-            <span style="font-size: 14px; color: var(--text-secondary);">سؤال ${app.quizState.currentIdx + 1} من ${total}</span>
-          </div>
-          <div class="quiz-timer">
-            <i class="far fa-clock"></i>
-            <span id="quiz-timer-text">--:--</span>
-          </div>
-        </div>
-
-        <div class="question-text">${q.question}</div>
-        <div class="options-list">
-          ${optionsHTML}
-        </div>
-
-        <div style="display: flex; justify-content: space-between; margin-top: 40px; border-top: 1px solid var(--border-color); padding-top: 25px;">
-          <button class="btn btn-outline" onclick="app.prevQuizQuestion()" ${app.quizState.currentIdx === 0 ? 'disabled' : ''}>السابق</button>
-          ${app.quizState.currentIdx === total - 1 
-            ? `<button class="btn btn-primary" onclick="app.submitExam()">إنهاء الاختبار</button>`
-            : `<button class="btn btn-primary" onclick="app.nextQuizQuestion()">التالي</button>`
-          }
-        </div>
-      </div>
-    </div>
-  `;
-};
-
-app.selectQuizOption = function(qId, option) {
-  app.quizState.answers[qId] = option;
-  app.renderQuizQuestion();
-};
-
-app.nextQuizQuestion = function() {
-  if (app.quizState.currentIdx < app.quizState.questions.length - 1) {
-    app.quizState.currentIdx++;
-    app.renderQuizQuestion();
-  }
-};
-
-app.prevQuizQuestion = function() {
-  if (app.quizState.currentIdx > 0) {
-    app.quizState.currentIdx--;
-    app.renderQuizQuestion();
-  }
-};
-
-app.submitExam = function() {
-  clearInterval(app.quizState.timerInterval);
-  const total = app.quizState.questions.length;
-  let correctCount = 0;
-
-  app.quizState.questions.forEach(q => {
-    if (app.quizState.answers[q.id] === q.answer) {
-      correctCount++;
-    }
-  });
-
-  const scorePct = Math.round((correctCount / total) * 100);
-
-  // حفظ العلامة في ملف تقدم الطالب
-  if (app.currentUser && app.currentUser.progress[app.quizState.courseId]) {
-    app.currentUser.progress[app.quizState.courseId].examScore = scorePct;
-    app.save();
-  }
-
-  // عرض صفحة التقرير والنتائج بالتفصيل مع إمكانية مراجعة الإجابات وشرح الحل
-  const root = document.getElementById('app');
-  const detailsHTML = app.quizState.questions.map((q, idx) => {
-    const studentAns = app.quizState.answers[q.id] || "لم تتم الإجابة";
-    const isCorrect = studentAns === q.answer;
-    return `
-      <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 20px; margin-bottom: 20px;">
-        <h4 style="font-weight: 700; margin-bottom: 12px;">س ${idx + 1}: ${q.question}</h4>
-        <div style="display: flex; gap: 20px; font-size: 14px; margin-bottom: 10px;">
-          <div>إجابتك: <span style="color: ${isCorrect ? 'var(--success)' : 'var(--danger)'}; font-weight: 700;">${studentAns}</span></div>
-          <div>الإجابة الصحيحة: <span style="color: var(--success); font-weight: 700;">${q.answer}</span></div>
-        </div>
-        <div class="explanation-box">
-          <strong>طريقة الحل والتفسير:</strong> ${q.explanation}
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  root.innerHTML = `
-    <div class="container" style="padding: 40px 0; max-width: 800px;">
-      <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 40px; text-align: center; margin-bottom: 40px; box-shadow: var(--card-shadow);">
-        <div style="width: 100px; height: 100px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 44px; margin: 0 auto 20px auto; background-color: ${scorePct >= 70 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)'}; color: ${scorePct >= 70 ? 'var(--success)' : 'var(--danger)'};">
-          <i class="fas ${scorePct >= 70 ? 'fa-award' : 'fa-times'}"></i>
-        </div>
-        <h2 style="font-size: 28px; font-weight: 800; margin-bottom: 10px;">نتيجتك في الاختبار: ${scorePct}%</h2>
-        <p style="color: var(--text-secondary); margin-bottom: 25px;">لقد أجبت بشكل صحيح على ${correctCount} من أصل ${total} أسئلة.</p>
-        
-        <div style="display: flex; justify-content: center; gap: 15px;">
-          <button class="btn btn-primary" onclick="router.navigateTo('student-dashboard')">لوحة التحكم</button>
-          ${scorePct >= 70 
-            ? `<button class="btn btn-accent" onclick="app.generateCertificate('${app.quizState.courseId}')">استلام شهادتك</button>` 
-            : `<button class="btn btn-outline" onclick="router.navigateTo('exam?courseId=${app.quizState.courseId}')">إعادة المحاولة</button>`
-          }
-        </div>
-      </div>
-
-      <h3 style="font-size: 20px; font-weight: 800; margin-bottom: 20px;">مراجعة وشرح الأسئلة بالتفصيل</h3>
-      ${detailsHTML}
-    </div>
-  `;
-};
-
-// توليد واستخراج الشهادات الرقمية
-app.generateCertificate = function(courseId) {
-  if (!app.currentUser) return;
-  const course = app.data.courses.find(c => c.id === courseId);
-  const certId = `CERT-${courseId.toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`;
-
-  // إضافة الشهادة لحساب الطالب لحفظها لاحقاً
-  if (!app.currentUser.certificates) app.currentUser.certificates = [];
-  if (!app.currentUser.certificates.find(c => c.courseId === courseId)) {
-    app.currentUser.certificates.push({ courseId, certId, date: new Date().toLocaleDateString('ar-EG') });
-    app.save();
-  }
-
-  const certData = app.currentUser.certificates.find(c => c.courseId === courseId);
-
+router.addRoute('privacy', () => {
   const root = document.getElementById('app');
   root.innerHTML = `
-    <div class="container certificate-preview-container">
-      <h2 style="font-size: 28px; font-weight: 800; margin-bottom: 30px;">تهانينا! شهادة إتمام المنهج</h2>
-      
-      <div class="certificate-canvas" id="printable-certificate">
-        <div class="certificate-inner">
-          <div class="cert-header">
-            <div style="text-align: right;">
-              <span style="font-size: 11px; color: var(--text-tertiary);">جمهورية مصر العربية</span><br>
-              <strong>منصة ملوك المعادلة</strong>
-            </div>
-            <i class="fas fa-crown logo-crown" style="font-size: 36px; color: var(--accent);"></i>
-          </div>
-
-          <div style="margin: 20px 0;">
-            <span class="cert-subtitle">تمنح إدارة المنصة هذه الشهادة لـ</span>
-            <div class="cert-recipient">${app.currentUser.name}</div>
-            <p style="font-size: 15px; color: var(--text-secondary); line-height: 1.8; max-width: 580px; margin: 15px auto;">
-              وذلك لاجتيازه بنجاح وتفوق كامل مقرر مادة <strong>"${course.title}"</strong> بتقدير ممتاز متمنين له دوام التوفيق والنجاح الدائم في الكلية.
-            </p>
-          </div>
-
-          <div style="display: flex; justify-content: space-between; width: 100%; align-items: flex-end; border-top: 1px solid var(--border-color); padding-top: 15px;">
-            <div style="text-align: right; font-size: 12px;">
-              <span>تاريخ الإصدار: ${certData.date}</span>
-            </div>
-            <div style="text-align: center;">
-              <i class="fas fa-stamp" style="font-size: 32px; color: var(--primary); opacity: 0.8;"></i><br>
-              <span style="font-size: 11px; font-weight: 700;">ختم الاعتماد الرقمي</span>
-            </div>
-            <div style="text-align: left; font-size: 11px; color: var(--text-tertiary);">
-              <span>رقم التحقق: ${certData.certId}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div style="margin-top: 30px; display: flex; gap: 15px;">
-        <button class="btn btn-primary" onclick="window.print()"><i class="fas fa-print"></i> طباعة / حفظ كـ PDF</button>
-        <button class="btn btn-outline" onclick="router.navigateTo('student-dashboard')">العودة للوحة التحكم</button>
-      </div>
+    <div class="container" style="padding: 60px 0; max-width: 800px; text-align: right;">
+      <h1 style="font-size: 32px; font-weight: 800; margin-bottom: 25px; color: var(--text-primary);">سياسة الخصوصية</h1>
+      <p style="line-height: 1.8; color: var(--text-secondary); font-size: 15px;">
+        نحن في منصة <strong>ملوك المعادلة</strong> نلتزم بحفظ خصوصيتك التامة وسلامة بياناتك. المنصة مصممة للطلاب للاستخدام المجاني المباشر دون الحاجة إلى إنشاء حساب أو تسجيل دخول، وبالتالي لا نقوم بجمع أو حفظ أي بيانات شخصية تخص الطلاب.
+      </p>
     </div>
   `;
-};
+});
 
-// إدارة مجتمع الطلاب
-app.showQAThread = function(threadId) {
-  const root = document.getElementById('app');
-  const thread = app.data.community.find(t => t.id === threadId);
-  if (!thread) return;
-
-  const repliesHTML = thread.replies.map(reply => `
-    <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 20px; margin-bottom: 15px; position: relative;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <span style="font-weight: 700; font-size: 14px;">
-          ${reply.author} 
-          ${reply.role === 'teacher' ? '<span class="badge-best-answer" style="background-color: var(--primary); margin-right: 8px;">مدرس الكورس</span>' : ''}
-        </span>
-        ${reply.isBest ? '<span class="badge-best-answer">أفضل إجابة</span>' : ''}
-      </div>
-      <p style="font-size: 14px; line-height: 1.7; color: var(--text-secondary);">${reply.content}</p>
-    </div>
-  `).join('');
-
-  root.innerHTML = `
-    <div class="container" style="padding: 40px 0; max-width: 800px;">
-      <button class="btn btn-text" onclick="router.navigateTo('lesson-player?courseId=${thread.courseId}')" style="margin-bottom: 20px;"><i class="fas fa-arrow-right"></i> العودة للدرس</button>
-      
-      <div class="qa-card" style="margin-bottom: 30px;">
-        <h2 style="font-size: 22px; font-weight: 800; margin-bottom: 12px;">${thread.title}</h2>
-        <p style="font-size: 15px; line-height: 1.8; color: var(--text-secondary);">${thread.content}</p>
-        <div class="qa-author" style="margin-top: 15px; border-top: 1px solid var(--border-color); padding-top: 15px;">
-          <span>كُتب بواسطة: ${thread.author}</span>
-          <span>التاريخ: ${thread.date}</span>
-        </div>
-      </div>
-
-      <h3 style="font-size: 18px; font-weight: 800; margin-bottom: 20px;">الردود والمناقشات</h3>
-      ${repliesHTML}
-
-      <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 25px; margin-top: 30px;">
-        <h4 style="font-weight: 700; margin-bottom: 15px;">إضافة رد أو تعليق</h4>
-        <form onsubmit="event.preventDefault(); app.addReplyToQA('${thread.id}', this.replyText.value);">
-          <div class="form-group">
-            <textarea name="replyText" class="form-input" rows="4" style="resize: none;" placeholder="اكتب ردك هنا..." required></textarea>
-          </div>
-          <button type="submit" class="btn btn-primary">إرسال الرد</button>
-        </form>
-      </div>
-    </div>
-  `;
-};
-
-app.openNewQAQuestion = function(courseId) {
+router.addRoute('terms', () => {
   const root = document.getElementById('app');
   root.innerHTML = `
-    <div class="container" style="padding: 40px 0; max-width: 600px;">
-      <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 35px;">
-        <h3 style="font-size: 22px; font-weight: 800; margin-bottom: 20px; text-align: center;">طرح سؤال جديد</h3>
-        <form onsubmit="event.preventDefault(); app.createNewQAQuestion('${courseId}', this.qTitle.value, this.qContent.value);">
-          <div class="form-group">
-            <label class="form-label">عنوان السؤال</label>
-            <input type="text" name="qTitle" class="form-input" required placeholder="مثال: استفسار عن قانون المصفوفة المربعة">
-          </div>
-          <div class="form-group">
-            <label class="form-label">تفاصيل سؤالك</label>
-            <textarea name="qContent" class="form-input" rows="5" style="resize: none;" required placeholder="اكتب سؤالك بالتفصيل لتتم إجابتك بشكل أدق..."></textarea>
-          </div>
-          <button type="submit" class="btn btn-primary" style="width: 100%;">نشر السؤال</button>
-        </form>
-      </div>
+    <div class="container" style="padding: 60px 0; max-width: 800px; text-align: right;">
+      <h1 style="font-size: 32px; font-weight: 800; margin-bottom: 25px; color: var(--text-primary);">الشروط والأحكام</h1>
+      <p style="line-height: 1.8; color: var(--text-secondary); font-size: 15px;">
+        جميع المواد التعليمية والملخصات والروابط المتوفرة على منصة <strong>ملوك المعادلة</strong> مقدمة مجاناً لوجه الله تعالى وللاستخدام الشخصي والدراسي لطلاب المعادلة فقط. لا يجوز استخدامها لأغراض تجارية.
+      </p>
     </div>
   `;
-};
+});
 
-app.createNewQAQuestion = function(courseId, title, content) {
-  const newQ = {
-    id: 'q_' + Date.now(),
-    courseId,
-    title,
-    content,
-    author: app.currentUser.name,
-    date: new Date().toLocaleDateString('ar-EG'),
-    replies: []
-  };
-  app.data.community.push(newQ);
-  app.save();
-  alert("تم نشر سؤالك بنجاح في مجتمع الطلاب!");
-  router.navigateTo(`lesson-player?courseId=${courseId}`);
-};
-
-app.addReplyToQA = function(threadId, content) {
-  const thread = app.data.community.find(t => t.id === threadId);
-  if (thread) {
-    thread.replies.push({
-      id: 'r_' + Date.now(),
-      author: app.currentUser.name,
-      role: app.currentUser.role,
-      content: content,
-      likes: 0,
-      isBest: false
-    });
-    app.save();
-    app.showQAThread(threadId);
-  }
-};
-
-// تحليلات وتعديلات لوحة تحكم المسؤول (Admin Panel Actions)
-app.toggleUserSuspension = function(userId) {
-  const user = app.data.users?.find(u => u.id === userId);
-  if (user) {
-    user.suspended = !user.suspended;
-    app.save();
-    alert(user.suspended ? "تم تجميد حساب الطالب بنجاح." : "تم إعادة تفعيل الحساب بنجاح.");
-    router.navigateTo('admin-dashboard');
-  }
-};
-
-app.adminCreateCourse = function() {
-  const title = prompt("أدخل عنوان الكورس الجديد:");
-  if (title) {
-    const category = prompt("أدخل فئة الكورس (math, geography, english, french):");
-    const newCourse = {
-      id: 'course_' + Date.now(),
-      title,
-      category,
-      categoryName: category === 'math' ? 'الرياضيات' : (category === 'geography' ? 'الجغرافيا' : (category === 'english' ? 'الانجليزي' : 'الفرنساوي')),
-      thumbnail: "https://images.unsplash.com/photo-1546410531-bb4caa6b424d?auto=format&fit=crop&q=80&w=600",
-      description: "كورس جديد تم إنشاؤه للتأهيل المباشر لاختبارات المعادلة القادمة.",
-      instructor: {
-        name: "د. أستاذ جديد",
-        title: "محاضر ومعد المادة",
-        avatar: "https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&q=80&w=150",
-        bio: "خبرة في إعداد المناهج الجامعية والمعادلة."
-      },
-      stats: { duration: "10 ساعات", lessonsCount: 0, studentsCount: 0, rating: 5.0 },
-      lessons: [],
-      reviews: []
-    };
-    app.data.courses.push(newCourse);
-    app.save();
-    alert("تم إنشاء الكورس بنجاح!");
-    router.navigateTo('admin-dashboard');
-  }
-};
-
-// بدء التوجيه الأولي عند التحميل
+// تفعيل التنقل عند التحميل
 window.addEventListener('load', () => router.handleRouting());
+export default app;

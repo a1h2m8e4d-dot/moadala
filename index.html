@@ -16,7 +16,7 @@
   <!-- Open Graph / SEO -->
   <meta property="og:title" content="ملوك المعادلة | طريقك للنجاح في المعادلة يبدأ من هنا">
   <meta property="og:description" content="أقوى منصة تعليمية مجانية بالكامل متخصصة في إعداد طلاب معادلة كلية التجارة.">
-  <meta property="og:image" content="https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&q=80&w=600">
+  <meta property="og:image" content="hero.jpg">
   <meta property="og:type" content="website">
 
   <!-- Google API & Google Identity Services Client Libraries -->
@@ -24,6 +24,9 @@
   <script async defer src="https://accounts.google.com/gsi/client"></script>
 </head>
 <body>
+
+  <!-- خلفية معتمة عند فتح القائمة على الهواتف -->
+  <div class="nav-overlay" onclick="app.toggleMobileMenu()"></div>
 
   <!-- شريط التنقل العلوي -->
   <header>
@@ -41,6 +44,10 @@
           <li><a onclick="router.navigateTo('contact')" class="nav-link" id="nav-link-contact">اتصل بنا</a></li>
         </ul>
       </nav>
+      
+      <button class="mobile-menu-btn" onclick="app.toggleMobileMenu()" id="mobile-menu-btn" aria-label="القائمة">
+        <i class="fas fa-bars"></i>
+      </button>
       
       <div class="nav-actions" id="nav-actions">
         <!-- يتم تعبئتها ديناميكياً بواسطة التطبيق -->
@@ -95,7 +102,8 @@
 
   <!-- Scripts -->
   <script src="data.js"></script>
-  <script type="module" src="mediaStore.js"></script>
-  <script type="module" src="app.js"></script>
+  <script src="router.js"></script>
+  <script src="mediaStore.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

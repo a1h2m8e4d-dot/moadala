@@ -421,7 +421,7 @@ router.addRoute('lessons', (params) => {
 
       <div style="display: flex; gap: 15px; border-top: 1px solid var(--border-color); padding-top: 20px; margin-top: 20px; justify-content: flex-start;">
         ${activeLesson.pdf_drive_url
-      ? `<a href="${activeLesson.pdf_drive_url}" target="_blank" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 8px;">
+      ? `<a href="${activeLesson.pdf_drive_url.startsWith('local_file_') ? '#' : activeLesson.pdf_drive_url}" id="pdf-external-link" target="_blank" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 8px;">
                <i class="fas fa-external-link-alt"></i>
                <span>فتح في نافذة خارجية</span>
              </a>`
@@ -439,7 +439,7 @@ router.addRoute('lessons', (params) => {
             <i class="far fa-file-pdf" style="color: var(--danger); margin-left: 6px;"></i> قراءة ملخص الدرس مباشرة
           </h3>
           <div style="width: 100%; height: 550px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); box-shadow: 0 2px 10px rgba(0,0,0,0.05);">
-            <iframe src="${getPdfEmbedUrl(activeLesson.pdf_drive_url)}" width="100%" height="100%" allow="autoplay" style="border: 0;"></iframe>
+            <iframe id="pdf-iframe" src="${activeLesson.pdf_drive_url.startsWith('local_file_') ? '' : getPdfEmbedUrl(activeLesson.pdf_drive_url)}" width="100%" height="100%" allow="autoplay" style="border: 0;"></iframe>
           </div>
         </div>
       ` : ''}
@@ -482,6 +482,16 @@ router.addRoute('lessons', (params) => {
       </div>
     </div>
   `;
+
+  // توليد الرابط المؤقت ديناميكياً لملفات IndexedDB المحلية
+  if (activeLesson && activeLesson.pdf_drive_url && activeLesson.pdf_drive_url.startsWith('local_file_')) {
+    window.mediaStore.getMediaUrl(activeLesson.pdf_drive_url).then(url => {
+      const externalLink = document.getElementById('pdf-external-link');
+      if (externalLink) externalLink.href = url;
+      const iframe = document.getElementById('pdf-iframe');
+      if (iframe) iframe.src = url;
+    }).catch(err => console.error("Error loading local PDF file: ", err));
+  }
 });
 
 // ==========================================
@@ -769,9 +779,14 @@ app.openEditLessonModal = function (lessonId) {
   form.description.value = lesson.description || '';
 
   if (lesson.pdf_drive_url) {
-    app.togglePdfSourceInput('url');
-    form.pdf_source[1].checked = true;
-    form.pdf_url.value = lesson.pdf_drive_url;
+    if (lesson.pdf_drive_url.startsWith('local_file_')) {
+      app.togglePdfSourceInput('file');
+      form.pdf_source[0].checked = true;
+    } else {
+      app.togglePdfSourceInput('url');
+      form.pdf_source[1].checked = true;
+      form.pdf_url.value = lesson.pdf_drive_url;
+    }
   } else {
     app.togglePdfSourceInput('file');
     form.pdf_source[0].checked = true;
@@ -902,7 +917,7 @@ app.uploadPdfFile = async function (file) {
     // حل محلي احتياطي: استخدام IndexedDB المحلي
     console.log('No Google Drive credentials configured. Falling back to local IndexedDB store.');
     const localId = await window.mediaStore.saveMedia(file);
-    return window.mediaStore.getMediaUrl(localId);
+    return localId;
   }
 };
 

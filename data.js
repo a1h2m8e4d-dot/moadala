@@ -5,7 +5,7 @@ const defaultData = {
     { id: "accounting-mahad", name: "المحاسبة", category: "mahad" },
     { id: "business-mahad", name: "إدارة الأعمال", category: "mahad" },
     { id: "math-mahad", name: "الرياضيات", category: "mahad" },
-    { id: "economics-mahad", name: "الاقتصاد", category: "mahad" },
+    { id: "economics-mahad", name: "تخصصات دراسية باللغة الانجليزية", category: "mahad" },
 
     // مواد معادلة الدبلومات
     { id: "english-diploma", name: "اللغة الإنجليزية", category: "diploma" },
@@ -44,10 +44,6 @@ const defaultData = {
     {
       q: "هل المنصة مجانية بالكامل؟",
       a: "نعم، المنصة مجانية بالكامل لوجه الله تعالى لخدمة الطلاب وتيسير العلم عليهم، ولا توجد أي اشتراكات أو رسوم."
-    },
-    {
-      q: "كيف يتم عرض الدروس والملخصات؟",
-      a: "يتم عرض الفيديوهات مباشرة من يوتيوب، وتنزيل ملخصات الشرح بصيغة PDF مرفوعة بشكل مباشر على Google Drive."
     }
   ],
   gdrive_settings: {

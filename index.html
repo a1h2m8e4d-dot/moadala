@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="ملوك المعادلة - المنصة التعليمية الأولى والرائدة في مصر المتخصصة في إعداد وتأهيل طلاب الدبلومات التجارية لاجتياز اختبار معادلة كلية التجارة بنجاح وتفوق.">
+  <meta name="description" content="ملوك المعادلة - المنصة التعليمية الأولى والفريدة لخدمة طلاب معادلة المعاهد وطلاب معادلة الدبلومات مجاناً لوجه الله.">
   <meta name="keywords" content="معادلة كلية التجارة, ملوك المعادلة, دبلوم تجارة, كلية التجارة, امتحانات المعادلة, رياضيات المعادلة, جغرافيا المعادلة">
   <meta name="author" content="ملوك المعادلة">
   
-  <title>ملوك المعادلة | أقوى منصة لإعداد طلاب معادلة كلية التجارة</title>
+  <title>ملوك المعادلة | أقوى منصة مجانية لمعادلة كلية التجارة</title>
   
   <!-- CDNs & Style Sheets -->
   <link rel="stylesheet" href="style.css">
@@ -15,9 +15,13 @@
   
   <!-- Open Graph / SEO -->
   <meta property="og:title" content="ملوك المعادلة | طريقك للنجاح في المعادلة يبدأ من هنا">
-  <meta property="og:description" content="أقوى منصة تعليمية متخصصة في إعداد طلاب معادلة كلية التجارة بأسلوب بابل شيت والامتحانات التفاعلية.">
+  <meta property="og:description" content="أقوى منصة تعليمية مجانية بالكامل متخصصة في إعداد طلاب معادلة كلية التجارة.">
   <meta property="og:image" content="https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&q=80&w=600">
   <meta property="og:type" content="website">
+
+  <!-- Google API & Google Identity Services Client Libraries -->
+  <script async defer src="https://apis.google.com/js/api.js"></script>
+  <script async defer src="https://accounts.google.com/gsi/client"></script>
 </head>
 <body>
 
@@ -32,7 +36,8 @@
       <nav>
         <ul class="nav-menu">
           <li><a onclick="router.navigateTo('home')" class="nav-link" id="nav-link-home">الرئيسية</a></li>
-          <li><a onclick="router.navigateTo('courses')" class="nav-link" id="nav-link-courses">الكورسات</a></li>
+          <li><a onclick="router.navigateTo('category?type=mahad')" class="nav-link" id="nav-link-mahad">معادلة المعاهد</a></li>
+          <li><a onclick="router.navigateTo('category?type=diploma')" class="nav-link" id="nav-link-diploma">معادلة الدبلومات</a></li>
           <li><a onclick="router.navigateTo('contact')" class="nav-link" id="nav-link-contact">اتصل بنا</a></li>
         </ul>
       </nav>
@@ -56,35 +61,35 @@
           <i class="fas fa-crown logo-crown"></i>
           <span>ملوك المعادلة</span>
         </div>
-        <p class="footer-desc">المنصة التعليمية الأولى والذكية لتأهيل طلاب الدبلومات والمعاهد الفنية التجارية لاجتياز اختبار المعادلة والالتحاق بكليات التجارة بالجامعات المصرية الحكومية.</p>
+        <p class="footer-desc">المنصة التعليمية الأولى لتأهيل طلاب الدبلومات والمعاهد الفنية التجارية لاجتياز اختبار المعادلة والالتحاق بكليات التجارة بالجامعات المصرية الحكومية - مجاناً بالكامل لوجه الله تعالى.</p>
       </div>
       <div>
         <h4 class="footer-title">روابط سريعة</h4>
         <ul class="footer-links">
           <li><a onclick="router.navigateTo('home')" class="footer-link" style="cursor: pointer;">الصفحة الرئيسية</a></li>
-          <li><a onclick="router.navigateTo('courses')" class="footer-link" style="cursor: pointer;">كل الكورسات</a></li>
+          <li><a onclick="router.navigateTo('category?type=mahad')" class="footer-link" style="cursor: pointer;">معادلة المعاهد</a></li>
+          <li><a onclick="router.navigateTo('category?type=diploma')" class="footer-link" style="cursor: pointer;">معادلة الدبلومات</a></li>
           <li><a onclick="router.navigateTo('contact')" class="footer-link" style="cursor: pointer;">تواصل معنا</a></li>
         </ul>
       </div>
       <div>
-        <h4 class="footer-title">المواد الدراسية</h4>
+        <h4 class="footer-title">مواد المعادلة</h4>
         <ul class="footer-links">
-          <li><a onclick="router.navigateTo('courses?category=math')" class="footer-link" style="cursor: pointer;">الرياضيات</a></li>
-          <li><a onclick="router.navigateTo('courses?category=geography')" class="footer-link" style="cursor: pointer;">الجغرافيا</a></li>
-          <li><a onclick="router.navigateTo('courses?category=english')" class="footer-link" style="cursor: pointer;">اللغة الإنجليزية</a></li>
-          <li><a onclick="router.navigateTo('courses?category=french')" class="footer-link" style="cursor: pointer;">اللغة الفرنسية</a></li>
+          <li><a onclick="router.navigateTo('lessons?subject=math-mahad')" class="footer-link" style="cursor: pointer;">الرياضيات (معاهد)</a></li>
+          <li><a onclick="router.navigateTo('lessons?subject=geography-diploma')" class="footer-link" style="cursor: pointer;">الجغرافيا (دبلومات)</a></li>
+          <li><a onclick="router.navigateTo('lessons?subject=accounting-mahad')" class="footer-link" style="cursor: pointer;">المحاسبة (معاهد)</a></li>
+          <li><a onclick="router.navigateTo('lessons?subject=english-diploma')" class="footer-link" style="cursor: pointer;">اللغة الإنجليزية (دبلومات)</a></li>
         </ul>
       </div>
       <div>
-        <h4 class="footer-title">الدعم والقوانين</h4>
+        <h4 class="footer-title">الإدارة</h4>
         <ul class="footer-links">
-          <li><a onclick="router.navigateTo('privacy')" class="footer-link" style="cursor: pointer;">سياسة الخصوصية</a></li>
-          <li><a onclick="router.navigateTo('terms')" class="footer-link" style="cursor: pointer;">الشروط والأحكام</a></li>
+          <li><a onclick="router.navigateTo('login')" class="footer-link" style="cursor: pointer;"><i class="fas fa-lock"></i> لوحة تحكم الأدمن</a></li>
         </ul>
       </div>
     </div>
     <div class="container footer-bottom">
-      <p>&copy; 2026 ملوك المعادلة. جميع الحقوق محفوظة لطلابنا ومبدعينا.</p>
+      <p>&copy; 2026 ملوك المعادلة. منصة صدقة جارية ومجانية بالكامل لوجه الله تعالى.</p>
     </div>
   </footer>
 

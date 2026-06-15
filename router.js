@@ -35,6 +35,9 @@ class AppRouter {
     
     // إخفاء القوائم المفتوحة والتمرير لأعلى الصفحة
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (window.app && typeof window.app.closeMobileMenu === 'function') {
+      window.app.closeMobileMenu();
+    }
     
     // تحديث الرابط النشط في القائمة الرئيسية
     document.querySelectorAll('.nav-link').forEach(link => {
@@ -57,4 +60,3 @@ class AppRouter {
 
 const router = new AppRouter();
 window.router = router;
-export default router;

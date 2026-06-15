@@ -1,16 +1,34 @@
 // ملوك المعادلة - نظام التحكم والعمليات المتقدم (App Logic)
-import router from './router.js';
 
 class AppState {
   constructor() {
     this.data = JSON.parse(localStorage.getItem('molok_data')) || defaultData;
+    
+    // تحديث وتزامن المواد تلقائياً مع التحديثات الجديدة في الكود
+    if (this.data && this.data.subjects) {
+      defaultData.subjects.forEach(defaultSub => {
+        const existingSub = this.data.subjects.find(s => s.id === defaultSub.id);
+        if (existingSub) {
+          existingSub.name = defaultSub.name;
+        } else {
+          this.data.subjects.push(defaultSub);
+        }
+      });
+      this.data.subjects = this.data.subjects.filter(s => defaultData.subjects.some(ds => ds.id === s.id));
+      this.save();
+    }
+    
+    // تنظيف تلقائي للسؤال الشائع القديم في حالة وجوده مخزناً مسبقاً
+    if (this.data.faq) {
+      this.data.faq = this.data.faq.filter(item => !item.q.includes('كيف يتم عرض الدروس'));
+    }
     this.currentUser = JSON.parse(localStorage.getItem('molok_user')) || null; // الأدمن فقط
     this.selectedAdminCourseId = null; // للتوافق
     this.activeAdminTab = 'mahad'; // 'mahad', 'diploma', 'settings'
     this.theme = localStorage.getItem('molok_theme') || 'light';
     this.currentSubjectId = null;
     this.currentLessonId = null;
-    
+
     // تهيئة gapi و GIS عند تحميل الصفحة
     this.tokenClient = null;
     this.gapiInited = false;
@@ -38,6 +56,33 @@ class AppState {
       const icon = document.querySelector('.theme-toggle i');
       if (icon) icon.className = 'fas fa-moon';
     }
+  }
+
+  toggleMobileMenu() {
+    const menu = document.querySelector('.nav-menu');
+    const overlay = document.querySelector('.nav-overlay');
+    const btn = document.querySelector('.mobile-menu-btn i');
+    if (!menu || !overlay) return;
+
+    const isOpen = menu.classList.contains('open');
+    if (isOpen) {
+      menu.classList.remove('open');
+      overlay.classList.remove('open');
+      if (btn) btn.className = 'fas fa-bars';
+    } else {
+      menu.classList.add('open');
+      overlay.classList.add('open');
+      if (btn) btn.className = 'fas fa-times';
+    }
+  }
+
+  closeMobileMenu() {
+    const menu = document.querySelector('.nav-menu');
+    const overlay = document.querySelector('.nav-overlay');
+    const btn = document.querySelector('.mobile-menu-btn i');
+    if (menu) menu.classList.remove('open');
+    if (overlay) overlay.classList.remove('open');
+    if (btn) btn.className = 'fas fa-bars';
   }
 
   login(email, password) {
@@ -78,7 +123,6 @@ class AppState {
         <button class="theme-toggle" onclick="app.toggleTheme()" title="تغيير المظهر">
           <i class="fas ${this.theme === 'light' ? 'fa-moon' : 'fa-sun'}"></i>
         </button>
-        <button class="btn btn-primary" onclick="router.navigateTo('login')">تسجيل دخول الأدمن</button>
       `;
     }
   }
@@ -177,7 +221,7 @@ router.addRoute('home', () => {
         </div>
         <div class="hero-illustration">
           <div class="hero-circle-bg"></div>
-          <img src="https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&q=80&w=600" class="hero-img" alt="طلاب المعادلة">
+          <img src="hero.jpg" class="hero-img" alt="طلاب المعادلة">
         </div>
       </div>
     </section>
@@ -194,7 +238,7 @@ router.addRoute('home', () => {
             <i class="fas fa-university" style="font-size: 24px;"></i>
           </div>
           <h3 class="feature-card-title" style="font-size: 22px; font-weight: 800; margin-bottom: 15px;">معادلة المعاهد الفنية</h3>
-          <p class="feature-card-desc">تحتوي على المواد المخصصة لطلبة المعاهد: المحاسبة، إدارة الأعمال، الرياضيات، والاقتصاد.</p>
+          <p class="feature-card-desc">تحتوي على المواد المخصصة لطلبة المعاهد: المحاسبة، إدارة الأعمال، الرياضيات، وتخصصات دراسية باللغة الانجليزية.</p>
           <button class="btn btn-outline" style="margin-top: 20px;">عرض المواد <i class="fas fa-arrow-left" style="margin-right: 8px;"></i></button>
         </div>
 
@@ -228,14 +272,14 @@ router.addRoute('home', () => {
 router.addRoute('category', (params) => {
   const root = document.getElementById('app');
   const type = params.type || 'mahad';
-  
+
   const title = type === 'mahad' ? 'معادلة المعاهد الفنية' : 'معادلة الدبلومات التجارية';
-  const subtitle = type === 'mahad' 
+  const subtitle = type === 'mahad'
     ? 'المناهج المعتمدة والدروس لطلاب معاهد السنتين الفنية التجارية للالتحاق بكلية التجارة.'
     : 'منهج الأربع مواد المقررة على طلاب دبلومات المدارس الفنية التجارية للالتحاق بكلية التجارة.';
 
   const filteredSubjects = app.data.subjects.filter(s => s.category === type);
-  
+
   // أيقونات وصور افتراضية للمواد
   const getSubjectIcon = (subjectId) => {
     if (subjectId.includes('math')) return 'fa-calculator';
@@ -274,7 +318,7 @@ router.addRoute('category', (params) => {
         <p style="color: var(--text-secondary); max-width: 700px; margin-top: 10px; line-height: 1.8;">${subtitle}</p>
       </div>
 
-      <div class="courses-grid" style="grid-template-columns: repeat(2, 1fr); gap: 20px; margin-top: 20px;">
+      <div class="courses-grid" style="gap: 20px; margin-top: 20px;">
         ${cards}
       </div>
     </div>
@@ -288,7 +332,7 @@ router.addRoute('lessons', (params) => {
   const root = document.getElementById('app');
   const subjectId = params.subject;
   const subject = app.data.subjects.find(s => s.id === subjectId);
-  
+
   if (!subject) {
     root.innerHTML = `<div class="container" style="padding: 80px 0; text-align: center;"><p>المادة غير موجودة.</p></div>`;
     return;
@@ -335,10 +379,25 @@ router.addRoute('lessons', (params) => {
     return `https://www.youtube.com/embed/${videoId}?rel=0`;
   };
 
+  // استخراج رابط تضمين الـ PDF من جوجل درايف أو الملفات المحلية
+  const getPdfEmbedUrl = (url) => {
+    if (!url) return '';
+    if (url.startsWith('blob:') || !url.includes('drive.google.com')) {
+      return url;
+    }
+    const regExp = /\/file\/d\/([a-zA-Z0-9_-]+)/;
+    const match = url.match(regExp);
+    if (match && match[1]) {
+      return `https://drive.google.com/file/d/${match[1]}/preview`;
+    }
+    return url;
+  };
+
   const playerHTML = activeLesson ? `
     <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 20px; box-shadow: var(--card-shadow);">
       <!-- مشغل اليوتيوب المدمج -->
-      <div class="video-container" style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 8px; background: #000; box-shadow: 0 4px 15px rgba(0,0,0,0.15);">
+      ${activeLesson.youtube_url ? `
+      <div class="video-container" style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 8px; background: #000; box-shadow: 0 4px 15px rgba(0,0,0,0.15); margin-bottom: 20px;">
         <iframe 
           style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;"
           src="${getYoutubeEmbedUrl(activeLesson.youtube_url)}" 
@@ -348,24 +407,42 @@ router.addRoute('lessons', (params) => {
           allowfullscreen>
         </iframe>
       </div>
+      ` : `
+      <div style="text-align: center; padding: 30px; background: var(--bg-tertiary); border-radius: 8px; margin-bottom: 20px; border: 1px dashed var(--border-color); display: flex; flex-direction: column; align-items: center; gap: 10px;">
+        <i class="far fa-file-pdf" style="font-size: 40px; color: var(--danger);"></i>
+        <span style="font-weight: 700; color: var(--text-secondary);">ملخص دراسي PDF (لا يوجد شرح فيديو)</span>
+      </div>
+      `}
 
-      <div style="margin-top: 20px; text-align: right;">
+      <div style="text-align: right; margin-bottom: 20px;">
         <h2 style="font-size: 24px; font-weight: 800; color: var(--text-primary); margin-bottom: 8px;">${activeLesson.title}</h2>
-        ${activeLesson.description ? `<p style="color: var(--text-secondary); font-size: 14px; line-height: 1.8; margin-bottom: 20px;">${activeLesson.description}</p>` : ''}
+        ${activeLesson.description ? `<p style="color: var(--text-secondary); font-size: 14px; line-height: 1.8;">${activeLesson.description}</p>` : ''}
       </div>
 
-      <div style="display: flex; gap: 15px; border-top: 1px solid var(--border-color); padding-top: 20px; margin-top: 20px;">
-        ${activeLesson.pdf_drive_url 
-          ? `<a href="${activeLesson.pdf_drive_url}" target="_blank" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 8px;">
-               <i class="far fa-file-pdf"></i>
-               <span>تحميل / قراءة ملخص الـ PDF</span>
+      <div style="display: flex; gap: 15px; border-top: 1px solid var(--border-color); padding-top: 20px; margin-top: 20px; justify-content: flex-start;">
+        ${activeLesson.pdf_drive_url
+      ? `<a href="${activeLesson.pdf_drive_url}" target="_blank" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 8px;">
+               <i class="fas fa-external-link-alt"></i>
+               <span>فتح في نافذة خارجية</span>
              </a>`
-          : `<button class="btn btn-outline" disabled style="opacity: 0.5; display: inline-flex; align-items: center; gap: 8px;">
+      : `<button class="btn btn-outline" disabled style="opacity: 0.5; display: inline-flex; align-items: center; gap: 8px;">
                <i class="far fa-file-pdf"></i>
                <span>لا يوجد ملف PDF مرفق</span>
              </button>`
-        }
+    }
       </div>
+
+      <!-- مستعرض الـ PDF المدمج كتحسين ملكي ممتاز للمذاكرة دون مغادرة الموقع -->
+      ${activeLesson.pdf_drive_url ? `
+        <div style="margin-top: 25px; border-top: 1px solid var(--border-color); padding-top: 25px; text-align: right;">
+          <h3 style="font-size: 17px; font-weight: 800; color: var(--text-primary); margin-bottom: 15px;">
+            <i class="far fa-file-pdf" style="color: var(--danger); margin-left: 6px;"></i> قراءة ملخص الدرس مباشرة
+          </h3>
+          <div style="width: 100%; height: 550px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); box-shadow: 0 2px 10px rgba(0,0,0,0.05);">
+            <iframe src="${getPdfEmbedUrl(activeLesson.pdf_drive_url)}" width="100%" height="100%" allow="autoplay" style="border: 0;"></iframe>
+          </div>
+        </div>
+      ` : ''}
     </div>
   ` : `
     <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 50px 20px; text-align: center; color: var(--text-secondary);">
@@ -385,7 +462,7 @@ router.addRoute('lessons', (params) => {
         </h1>
       </div>
 
-      <div class="player-layout" style="display: grid; grid-template-columns: 2.2fr 1fr; gap: 30px;">
+      <div class="player-layout">
         <!-- المحتوى الرئيسي (الفيديو) -->
         <div>
           ${playerHTML}
@@ -430,9 +507,6 @@ router.addRoute('login', () => {
         </div>
         <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px; padding: 12px;">دخول</button>
       </form>
-      <div style="margin-top: 20px; text-align: center; font-size: 12px; color: var(--text-tertiary);">
-        <span>ملاحظة تجريبية: البريد admin@molok.com وكلمة المرور admin123</span>
-      </div>
     </div>
   `;
 });
@@ -450,7 +524,7 @@ router.addRoute('admin-dashboard', () => {
   // تصفية المواد بالقسم النشط
   const activeCategory = app.activeAdminTab === 'settings' ? 'mahad' : app.activeAdminTab;
   const adminSubjects = app.data.subjects.filter(s => s.category === activeCategory);
-  
+
   if (!app.selectedAdminSubjectId && adminSubjects.length > 0) {
     app.selectedAdminSubjectId = adminSubjects[0].id;
   }
@@ -588,8 +662,8 @@ router.addRoute('admin-dashboard', () => {
           </div>
 
           <div class="form-group" style="margin-bottom: 15px; text-align: right;">
-            <label class="form-label">رابط فيديو يوتيوب</label>
-            <input type="text" name="youtube_url" class="form-input" required placeholder="https://www.youtube.com/watch?v=..." style="width: 100%;">
+            <label class="form-label">رابط فيديو يوتيوب (اختياري)</label>
+            <input type="text" name="youtube_url" class="form-input" placeholder="https://www.youtube.com/watch?v=..." style="width: 100%;">
           </div>
 
           <div class="form-group" style="margin-bottom: 15px; text-align: right;">
@@ -641,12 +715,12 @@ router.addRoute('admin-dashboard', () => {
 // ==========================================
 // وظائف الأدمن ولوحة التحكم (Admin Functions)
 // ==========================================
-app.switchAdminTab = function(tab) {
+app.switchAdminTab = function (tab) {
   app.activeAdminTab = tab;
   router.handleRouting();
 };
 
-app.saveSettings = function(form) {
+app.saveSettings = function (form) {
   app.data.gdrive_settings.clientId = form.clientId.value.trim();
   app.data.gdrive_settings.apiKey = form.apiKey.value.trim();
   app.data.gdrive_settings.folderId = form.folderId.value.trim();
@@ -657,7 +731,7 @@ app.saveSettings = function(form) {
 };
 
 // التبديل بين الرفع والروابط
-app.togglePdfSourceInput = function(source) {
+app.togglePdfSourceInput = function (source) {
   const fileField = document.getElementById('pdf-file-field');
   const urlField = document.getElementById('pdf-url-field');
   if (source === 'file') {
@@ -670,7 +744,7 @@ app.togglePdfSourceInput = function(source) {
 };
 
 // فتح مودال الإضافة
-app.openAddLessonModal = function() {
+app.openAddLessonModal = function () {
   const modal = document.getElementById('lesson-modal');
   const form = document.getElementById('lesson-form');
   document.getElementById('modal-title').innerText = 'إضافة درس جديد لمادة ' + app.data.subjects.find(s => s.id === app.selectedAdminSubjectId).name;
@@ -681,19 +755,19 @@ app.openAddLessonModal = function() {
 };
 
 // فتح مودال التعديل
-app.openEditLessonModal = function(lessonId) {
+app.openEditLessonModal = function (lessonId) {
   const lesson = app.data.lessons.find(l => l.id === lessonId);
   if (!lesson) return;
 
   const modal = document.getElementById('lesson-modal');
   const form = document.getElementById('lesson-form');
   document.getElementById('modal-title').innerText = 'تعديل الدرس الحالي';
-  
+
   form.lesson_id.value = lesson.id;
   form.title.value = lesson.title;
   form.youtube_url.value = lesson.youtube_url;
   form.description.value = lesson.description || '';
-  
+
   if (lesson.pdf_drive_url) {
     app.togglePdfSourceInput('url');
     form.pdf_source[1].checked = true;
@@ -702,25 +776,25 @@ app.openEditLessonModal = function(lessonId) {
     app.togglePdfSourceInput('file');
     form.pdf_source[0].checked = true;
   }
-  
+
   modal.style.display = 'flex';
 };
 
-app.closeLessonModal = function() {
+app.closeLessonModal = function () {
   document.getElementById('lesson-modal').style.display = 'none';
 };
 
 // حفظ الدرس (إضافة أو تعديل)
-app.saveLesson = async function(form) {
+app.saveLesson = async function (form) {
   const lessonId = form.lesson_id.value;
   const title = form.title.value.trim();
   const youtubeUrl = form.youtube_url.value.trim();
   const description = form.description.value.trim();
   const pdfSource = form.pdf_source.value;
-  
+
   const saveBtn = document.getElementById('modal-save-btn');
   const statusDiv = document.getElementById('modal-upload-status');
-  
+
   saveBtn.disabled = true;
   statusDiv.style.display = 'block';
 
@@ -754,7 +828,7 @@ app.saveLesson = async function(form) {
       // إضافة جديد
       const subLessons = app.data.lessons.filter(l => l.subject_id === app.selectedAdminSubjectId);
       const nextOrder = subLessons.length > 0 ? Math.max(...subLessons.map(l => l.order || 0)) + 1 : 1;
-      
+
       const newLesson = {
         id: 'lesson_' + Date.now(),
         subject_id: app.selectedAdminSubjectId,
@@ -783,7 +857,7 @@ app.saveLesson = async function(form) {
 };
 
 // وظيفة الرفع التي تختار بين Google Drive و التخزين المحلي الاحتياطي
-app.uploadPdfFile = async function(file) {
+app.uploadPdfFile = async function (file) {
   const settings = app.data.gdrive_settings;
   const subject = app.data.subjects.find(s => s.id === app.selectedAdminSubjectId);
   const categoryName = subject.category === 'mahad' ? 'معادلة المعاهد' : 'معادلة الدبلومات';
@@ -793,7 +867,7 @@ app.uploadPdfFile = async function(file) {
   if (settings.clientId && settings.token && typeof gapi !== 'undefined' && gapi.client && gapi.client.drive) {
     try {
       console.log('Starting Google Drive Upload process...');
-      
+
       // 1. إيجاد أو إنشاء المجلد الرئيسي "ملوك المعادلة"
       let rootFolderId = settings.folderId;
       if (!rootFolderId) {
@@ -833,12 +907,12 @@ app.uploadPdfFile = async function(file) {
 };
 
 // دوال مساعدة لـ Google Drive API
-app.getOrCreateDriveFolder = async function(folderName, parentId) {
+app.getOrCreateDriveFolder = async function (folderName, parentId) {
   let query = `mimeType = 'application/vnd.google-apps.folder' and name = '${folderName}' and trashed = false`;
   if (parentId) {
     query += ` and '${parentId}' in parents`;
   }
-  
+
   const response = await gapi.client.drive.files.list({
     q: query,
     spaces: 'drive',
@@ -866,7 +940,7 @@ app.getOrCreateDriveFolder = async function(folderName, parentId) {
   }
 };
 
-app.uploadFileToDriveFolder = async function(file, parentFolderId) {
+app.uploadFileToDriveFolder = async function (file, parentFolderId) {
   const metadata = {
     name: file.name,
     parents: [parentFolderId]
@@ -890,7 +964,7 @@ app.uploadFileToDriveFolder = async function(file, parentFolderId) {
   return result.id;
 };
 
-app.makeDriveFilePublic = async function(fileId) {
+app.makeDriveFilePublic = async function (fileId) {
   // استخدام fetch لإنشاء صلاحيات الوصول
   const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
     method: 'POST',
@@ -910,7 +984,7 @@ app.makeDriveFilePublic = async function(fileId) {
 };
 
 // حذف درس
-app.deleteLesson = function(lessonId) {
+app.deleteLesson = function (lessonId) {
   if (confirm('هل أنت متأكد من رغبتك في حذف هذا الدرس نهائياً؟')) {
     app.data.lessons = app.data.lessons.filter(l => l.id !== lessonId);
     app.save();
@@ -920,7 +994,7 @@ app.deleteLesson = function(lessonId) {
 };
 
 // ترتيب الدروس
-app.moveLesson = function(lessonId, direction) {
+app.moveLesson = function (lessonId, direction) {
   const subjectId = app.selectedAdminSubjectId;
   const subLessons = app.data.lessons
     .filter(l => l.subject_id === subjectId)
@@ -1009,4 +1083,3 @@ router.addRoute('terms', () => {
 
 // تفعيل التنقل عند التحميل
 window.addEventListener('load', () => router.handleRouting());
-export default app;

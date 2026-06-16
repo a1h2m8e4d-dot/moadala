@@ -2,8 +2,19 @@
 
 class AppState {
   constructor() {
-    this.data = JSON.parse(localStorage.getItem('molok_data')) || defaultData;
+    let storedData = null;
+    try {
+      storedData = JSON.parse(localStorage.getItem('molok_data'));
+    } catch (e) {
+      console.error('Error parsing stored molok_data:', e);
+    }
     
+    this.data = storedData || {};
+    if (!this.data.subjects) this.data.subjects = [...defaultData.subjects];
+    if (!this.data.lessons) this.data.lessons = [...defaultData.lessons];
+    if (!this.data.faq) this.data.faq = [...defaultData.faq];
+    if (!this.data.gdrive_settings) this.data.gdrive_settings = { ...defaultData.gdrive_settings };
+
     // تحديث وتزامن المواد تلقائياً مع التحديثات الجديدة في الكود
     if (this.data && this.data.subjects) {
       defaultData.subjects.forEach(defaultSub => {
@@ -194,7 +205,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // 1. الصفحة الرئيسية (Home Page)
 // ==========================================
 router.addRoute('home', () => {
-  const root = document.getElementById('app');
+  const root = document.getElementById('main-content');
   let faqHTML = app.data.faq.map((item, idx) => `
     <div class="feature-card" style="padding: 24px; cursor: pointer; margin-bottom: 15px;" onclick="document.getElementById('faq-ans-${idx}').style.display = document.getElementById('faq-ans-${idx}').style.display === 'none' ? 'block' : 'none'">
       <div style="display: flex; justify-content: space-between; align-items: center; font-weight: 700;">
@@ -270,7 +281,7 @@ router.addRoute('home', () => {
 // 2. صفحة الفئة (معادلة المعاهد أو الدبلومات)
 // ==========================================
 router.addRoute('category', (params) => {
-  const root = document.getElementById('app');
+  const root = document.getElementById('main-content');
   const type = params.type || 'mahad';
 
   const title = type === 'mahad' ? 'معادلة المعاهد الفنية' : 'معادلة الدبلومات التجارية';
@@ -329,7 +340,7 @@ router.addRoute('category', (params) => {
 // 3. صفحة عرض الدروس (Lessons Page)
 // ==========================================
 router.addRoute('lessons', (params) => {
-  const root = document.getElementById('app');
+  const root = document.getElementById('main-content');
   const subjectId = params.subject;
   const subject = app.data.subjects.find(s => s.id === subjectId);
 
@@ -498,7 +509,7 @@ router.addRoute('lessons', (params) => {
 // 4. صفحة تسجيل دخول الأدمن
 // ==========================================
 router.addRoute('login', () => {
-  const root = document.getElementById('app');
+  const root = document.getElementById('main-content');
   root.innerHTML = `
     <div class="auth-container" style="max-width: 450px; margin: 80px auto; padding: 40px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); box-shadow: var(--card-shadow);">
       <div class="auth-header" style="text-align: center; margin-bottom: 30px;">
@@ -525,7 +536,7 @@ router.addRoute('login', () => {
 // 5. لوحة تحكم الأدمن (Admin Dashboard)
 // ==========================================
 router.addRoute('admin-dashboard', () => {
-  const root = document.getElementById('app');
+  const root = document.getElementById('main-content');
   if (!app.currentUser || app.currentUser.role !== 'admin') {
     router.navigateTo('login');
     return;
@@ -1038,7 +1049,7 @@ app.moveLesson = function (lessonId, direction) {
 // مسارات الصفحات الفرعية والاتصال
 // ==========================================
 router.addRoute('contact', () => {
-  const root = document.getElementById('app');
+  const root = document.getElementById('main-content');
   root.innerHTML = `
     <div class="container" style="padding: 60px 0; max-width: 600px;">
       <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 40px; box-shadow: var(--card-shadow);">
@@ -1073,7 +1084,7 @@ router.addRoute('contact', () => {
 });
 
 router.addRoute('privacy', () => {
-  const root = document.getElementById('app');
+  const root = document.getElementById('main-content');
   root.innerHTML = `
     <div class="container" style="padding: 60px 0; max-width: 800px; text-align: right;">
       <h1 style="font-size: 32px; font-weight: 800; margin-bottom: 25px; color: var(--text-primary);">سياسة الخصوصية</h1>
@@ -1085,7 +1096,7 @@ router.addRoute('privacy', () => {
 });
 
 router.addRoute('terms', () => {
-  const root = document.getElementById('app');
+  const root = document.getElementById('main-content');
   root.innerHTML = `
     <div class="container" style="padding: 60px 0; max-width: 800px; text-align: right;">
       <h1 style="font-size: 32px; font-weight: 800; margin-bottom: 25px; color: var(--text-primary);">الشروط والأحكام</h1>
